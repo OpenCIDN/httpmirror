@@ -22,7 +22,7 @@ func httpHead(ctx context.Context, client *http.Client, p string) (fs.FileInfo, 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("http status %d", resp.StatusCode)
+		return nil, fmt.Errorf("%w: http status %d", ErrNotOK, resp.StatusCode)
 	}
 
 	return &fileInfo{
@@ -42,11 +42,18 @@ func httpGet(ctx context.Context, client *http.Client, p string) (io.ReadCloser,
 		return nil, nil, err
 	}
 
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, nil, fmt.Errorf("%w: http status %d", ErrNotOK, resp.StatusCode)
+	}
+
 	return resp.Body, &fileInfo{
 		name: p,
 		resp: resp,
 	}, nil
 }
+
+var ErrNotOK = fmt.Errorf("http status not ok")
 
 var _ fs.FileInfo = (*fileInfo)(nil)
 

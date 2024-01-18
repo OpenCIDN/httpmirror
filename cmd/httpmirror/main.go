@@ -14,12 +14,13 @@ import (
 )
 
 var (
-	address          string
-	endpoint         string
-	bucket           string
-	accessKeyID      string
-	accessKeySecret  string
-	checkSyncTimeout time.Duration
+	address           string
+	endpoint          string
+	bucket            string
+	accessKeyID       string
+	accessKeySecret   string
+	hostFromFirstPath bool
+	checkSyncTimeout  time.Duration
 )
 
 func init() {
@@ -28,6 +29,7 @@ func init() {
 	flag.StringVar(&bucket, "bucket", "", "bucket")
 	flag.StringVar(&accessKeyID, "access-key-id", "", "access key id")
 	flag.StringVar(&accessKeySecret, "access-key-secret", "", "access key secret")
+	flag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	flag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 
 	flag.Parse()
@@ -70,7 +72,8 @@ func main() {
 		RedirectLinks: func(p string) (string, bool) {
 			return fmt.Sprintf("https://%s.%s/%s", bucket, endpoint, p), true
 		},
-		CheckSyncTimeout: checkSyncTimeout,
+		CheckSyncTimeout:  checkSyncTimeout,
+		HostFromFirstPath: hostFromFirstPath,
 	}
 
 	logger.Println("listen on", address)

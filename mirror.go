@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"errors"
 
 	"github.com/minio/minio-go/v7/pkg/s3utils"
 )
@@ -32,6 +33,8 @@ type MirrorHandler struct {
 	Logger Logger
 	// CheckSyncTimeout is the timeout for checking the sync
 	CheckSyncTimeout time.Duration
+	// HostFromFirstPath is the host from the first path
+	HostFromFirstPath bool
 
 	mut sync.Map
 }
@@ -46,7 +49,25 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	path := r.URL.Path
+	if len(path) == 0 || strings.HasSuffix(path, "/") {
+		m.notFoundResponse(w, r)
+		return
+	}
 	host := r.Host
+	if m.HostFromFirstPath {
+		paths := strings.Split(path[1:], "/")
+		host = paths[0]
+		path = "/" + strings.Join(paths[1:], "/")
+		if path == "/" {
+			m.notFoundResponse(w, r)
+			return
+		}
+
+		r.Host = host
+		r.URL.Path = path
+	}
+
 	if !s3utils.IsValidDomain(host) {
 		m.notFoundResponse(w, r)
 		return
@@ -142,6 +163,10 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	resp, info, err := httpGet(r.Context(), m.client(), r.URL.String())
 	if err != nil {
+		if errors.Is(err, ErrNotOK) {
+			m.notFoundResponse(w, r)
+			return
+		}
 		m.errorResponse(w, r, err)
 		return
 	}
@@ -150,9 +175,12 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	var body io.Reader = resp
 
 	contentLength := info.Size()
-	if contentLength > 0 {
-		body = io.LimitReader(body, contentLength)
+	if contentLength == 0 {
+		m.notFoundResponse(w, r)
+		return
 	}
+
+	body = io.LimitReader(body, contentLength)
 
 	if m.Logger != nil {
 		m.Logger.Println("Cache", u)

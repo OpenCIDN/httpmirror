@@ -19,16 +19,18 @@ var (
 	bucket            string
 	accessKeyID       string
 	accessKeySecret   string
+	redirectLinks     string
 	hostFromFirstPath bool
 	checkSyncTimeout  time.Duration
 )
 
 func init() {
 	flag.StringVar(&address, "address", ":8080", "listen on the address")
-	flag.StringVar(&endpoint, "endpoint", "", "endpoint")
-	flag.StringVar(&bucket, "bucket", "", "bucket")
-	flag.StringVar(&accessKeyID, "access-key-id", "", "access key id")
-	flag.StringVar(&accessKeySecret, "access-key-secret", "", "access key secret")
+	flag.StringVar(&endpoint, "s3-endpoint", "", "endpoint")
+	flag.StringVar(&bucket, "s3-bucket", "", "bucket")
+	flag.StringVar(&accessKeyID, "s3-access-key-id", "", "access key id")
+	flag.StringVar(&accessKeySecret, "s3-access-key-secret", "", "access key secret")
+	flag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
 	flag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	flag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 
@@ -70,7 +72,7 @@ func main() {
 		Logger:      logger,
 		RemoteCache: client,
 		RedirectLinks: func(p string) (string, bool) {
-			return fmt.Sprintf("https://%s.%s/%s", bucket, endpoint, p), true
+			return fmt.Sprintf("%s/%s", redirectLinks, p), true
 		},
 		CheckSyncTimeout:  checkSyncTimeout,
 		HostFromFirstPath: hostFromFirstPath,

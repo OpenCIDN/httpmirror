@@ -109,17 +109,30 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mutValue, loaded := m.mut.LoadOrStore(u, &sync.RWMutex{})
-	mut := mutValue.(*sync.RWMutex)
+	closeValue, loaded := m.mut.LoadOrStore(u, make(chan struct{}))
+	closeCh := closeValue.(chan struct{})
 	if loaded {
-		mut.RLock()
-		defer mut.RUnlock()
-		http.Redirect(w, r, u, http.StatusFound)
+		select {
+		case <-ctx.Done():
+			m.errorResponse(w, r, ctx.Err())
+		case <-closeCh:
+			http.Redirect(w, r, u, http.StatusFound)
+		}
 		return
+	}
+
+	doneCache := func() {
+		m.mut.Delete(u)
+		close(closeCh)
 	}
 
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			m.errorResponse(w, r, ctx.Err())
+			doneCache()
+			return
+		}
 		if m.Logger != nil {
 			m.Logger.Println("Cache Miss", u, err)
 		}
@@ -130,6 +143,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 		if m.CheckSyncTimeout == 0 {
 			http.Redirect(w, r, u, http.StatusFound)
+			doneCache()
 			return
 		}
 
@@ -141,6 +155,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 				m.Logger.Println("Source Miss", u, err)
 			}
 			http.Redirect(w, r, u, http.StatusFound)
+			doneCache()
 			return
 		}
 		sourceCancel()
@@ -149,8 +164,8 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		cacheSize := cacheInfo.Size()
 		if cacheSize != 0 && (sourceSize == 0 || sourceSize == cacheSize) {
 			http.Redirect(w, r, u, http.StatusFound)
+			doneCache()
 			return
-
 		}
 
 		if m.Logger != nil {
@@ -160,12 +175,8 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	errCh := make(chan error, 1)
 
-	mut.Lock()
 	go func() {
-		defer func() {
-			m.mut.Delete(u)
-			mut.Unlock()
-		}()
+		defer doneCache()
 		err = m.cacheFile(context.Background(), file, r.URL.String(), u)
 		errCh <- err
 	}()

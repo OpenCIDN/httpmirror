@@ -101,6 +101,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	file := path.Join(r.Host, r.URL.Path)
 	u, ok := m.RedirectLinks(file)
 	if !ok {
@@ -108,21 +109,16 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mut, loaded := m.mut.LoadOrStore(u, &sync.Mutex{})
+	mutValue, loaded := m.mut.LoadOrStore(u, &sync.RWMutex{})
+	mut := mutValue.(*sync.RWMutex)
 	if loaded {
-		mut := mut.(*sync.Mutex)
-		mut.Lock()
-		defer mut.Unlock()
-	} else {
-		mut := mut.(*sync.Mutex)
-		mut.Lock()
-		defer func() {
-			m.mut.Delete(u)
-			mut.Unlock()
-		}()
+		mut.RLock()
+		defer mut.RUnlock()
+		http.Redirect(w, r, u, http.StatusFound)
+		return
 	}
 
-	cacheInfo, err := m.RemoteCache.Stat(r.Context(), file)
+	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
 		if m.Logger != nil {
 			m.Logger.Println("Cache Miss", u, err)
@@ -137,16 +133,17 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		sourceCtx, sourceCancel := context.WithTimeout(r.Context(), m.CheckSyncTimeout)
-		defer sourceCancel()
+		sourceCtx, sourceCancel := context.WithTimeout(ctx, m.CheckSyncTimeout)
 		sourceInfo, err := httpHead(sourceCtx, m.client(), r.URL.String())
 		if err != nil {
+			sourceCancel()
 			if m.Logger != nil {
 				m.Logger.Println("Source Miss", u, err)
 			}
 			http.Redirect(w, r, u, http.StatusFound)
 			return
 		}
+		sourceCancel()
 
 		sourceSize := sourceInfo.Size()
 		cacheSize := cacheInfo.Size()
@@ -161,14 +158,40 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	resp, info, err := httpGet(r.Context(), m.client(), r.URL.String())
-	if err != nil {
-		if errors.Is(err, ErrNotOK) {
-			m.notFoundResponse(w, r)
+	errCh := make(chan error, 1)
+
+	mut.Lock()
+	go func() {
+		defer func() {
+			m.mut.Delete(u)
+			mut.Unlock()
+		}()
+		err = m.cacheFile(context.Background(), file, r.URL.String(), u)
+		errCh <- err
+	}()
+
+	select {
+	case <-ctx.Done():
+		m.errorResponse(w, r, ctx.Err())
+		return
+	case err := <-errCh:
+		if err != nil {
+			if errors.Is(err, ErrNotOK) {
+				m.notFoundResponse(w, r)
+				return
+			}
+			m.errorResponse(w, r, err)
 			return
 		}
-		m.errorResponse(w, r, err)
+		http.Redirect(w, r, u, http.StatusFound)
 		return
+	}
+}
+
+func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFile string) error {
+	resp, info, err := httpGet(ctx, m.client(), sourceFile)
+	if err != nil {
+		return err
 	}
 	defer resp.Close()
 
@@ -176,22 +199,20 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	contentLength := info.Size()
 	if contentLength == 0 {
-		m.notFoundResponse(w, r)
-		return
+		return ErrNotOK
 	}
 
 	body = io.LimitReader(body, contentLength)
 
 	if m.Logger != nil {
-		m.Logger.Println("Cache", u)
+		m.Logger.Println("Cache", cacheFile, contentLength)
 	}
-	err = m.RemoteCache.Put(r.Context(), file, body)
+	err = m.RemoteCache.Put(ctx, key, body)
 	if err != nil {
-		m.errorResponse(w, r, err)
-		return
+		return err
 	}
 
-	http.Redirect(w, r, u, http.StatusFound)
+	return nil
 }
 
 func (m *MirrorHandler) directResponse(w http.ResponseWriter, r *http.Request) {

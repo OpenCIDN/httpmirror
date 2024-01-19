@@ -202,7 +202,9 @@ func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFil
 		return ErrNotOK
 	}
 
-	body = io.LimitReader(body, contentLength)
+	if contentLength > 0 {
+		body = io.LimitReader(body, contentLength)
+	}
 
 	if m.Logger != nil {
 		m.Logger.Println("Cache", cacheFile, contentLength)
@@ -244,7 +246,7 @@ func (m *MirrorHandler) directResponse(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if m.Logger != nil {
-			m.Logger.Println("Response", r.URL)
+			m.Logger.Println("Response", r.URL, contentLength)
 		}
 		_, err = io.Copy(w, body)
 		if err != nil {

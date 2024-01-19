@@ -87,7 +87,12 @@ func (m *Minio) Get(ctx context.Context, p string) (f io.ReadCloser, err error) 
 }
 
 func (m *Minio) Put(ctx context.Context, p string, f io.Reader) (err error) {
-	_, err = m.client.PutObject(ctx, m.bucket, m.relPath(p), f, -1, minio.PutObjectOptions{})
+	var size int64 = -1
+	limitedReader, ok := f.(*io.LimitedReader)
+	if ok {
+		size = limitedReader.N
+	}
+	_, err = m.client.PutObject(ctx, m.bucket, m.relPath(p), f, size, minio.PutObjectOptions{})
 	if err != nil {
 		return err
 	}

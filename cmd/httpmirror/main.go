@@ -5,12 +5,12 @@ import (
 	"log"
 	"net/http"
 	"os"
-
+	"time"
 	"errors"
 	"fmt"
+
 	"github.com/wzshiming/httpmirror"
 	"github.com/wzshiming/httpmirror/minio"
-	"time"
 )
 
 var (

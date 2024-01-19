@@ -68,7 +68,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = path
 	}
 
-	if !s3utils.IsValidDomain(host) {
+	if !strings.Contains(host, ".") || !s3utils.IsValidDomain(host) {
 		m.notFoundResponse(w, r)
 		return
 	}

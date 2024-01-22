@@ -2,7 +2,10 @@ module github.com/wzshiming/httpmirror
 
 go 1.21
 
-require github.com/minio/minio-go/v7 v7.0.66
+require (
+	github.com/minio/minio-go/v7 v7.0.66
+	github.com/wzshiming/httpseek v0.0.0-20240122110938-0533c4b2d7c5
+)
 
 require (
 	github.com/dustin/go-humanize v1.0.1 // indirect

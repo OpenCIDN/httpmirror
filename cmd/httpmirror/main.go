@@ -1,27 +1,29 @@
 package main
 
 import (
+	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
-	"errors"
-	"fmt"
 
 	"github.com/wzshiming/httpmirror"
 	"github.com/wzshiming/httpmirror/minio"
+	"github.com/wzshiming/httpseek"
 )
 
 var (
-	address           string
-	endpoint          string
-	bucket            string
-	accessKeyID       string
-	accessKeySecret   string
-	redirectLinks     string
-	hostFromFirstPath bool
-	checkSyncTimeout  time.Duration
+	address                 string
+	endpoint                string
+	bucket                  string
+	accessKeyID             string
+	accessKeySecret         string
+	redirectLinks           string
+	hostFromFirstPath       bool
+	checkSyncTimeout        time.Duration
+	ContinuationGetInterval time.Duration
 )
 
 func init() {
@@ -33,6 +35,7 @@ func init() {
 	flag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
 	flag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	flag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
+	flag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
 
 	flag.Parse()
 }
@@ -56,6 +59,16 @@ func main() {
 		client = c
 	}
 
+	var transport http.RoundTripper = http.DefaultTransport
+
+	if ContinuationGetInterval > 0 {
+		transport = httpseek.NewMustReaderTransport(transport, func(r *http.Request, err error) error {
+			logger.Println("Retry cache", r.URL)
+			time.Sleep(ContinuationGetInterval)
+			return nil
+		})
+	}
+
 	ph := &httpmirror.MirrorHandler{
 		Client: &http.Client{
 			CheckRedirect: func(req *http.Request, via []*http.Request) error {
@@ -65,9 +78,7 @@ func main() {
 				logger.Println("redirect", req.URL)
 				return nil
 			},
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment,
-			},
+			Transport: transport,
 		},
 		Logger:      logger,
 		RemoteCache: client,

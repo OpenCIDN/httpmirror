@@ -43,7 +43,7 @@ func init() {
 func main() {
 	logger := log.New(os.Stderr, "[http mirror] ", log.LstdFlags)
 
-	var client *minio.Minio
+	var client httpmirror.FS
 
 	if endpoint != "" {
 		c, err := minio.NewMinio(minio.Config{

@@ -24,6 +24,7 @@ var (
 	hostFromFirstPath       bool
 	checkSyncTimeout        time.Duration
 	ContinuationGetInterval time.Duration
+	ContinuationGetRetry    int
 )
 
 func init() {
@@ -36,6 +37,7 @@ func init() {
 	flag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	flag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 	flag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
+	flag.IntVar(&ContinuationGetRetry, "continuation-get-retry", 0, "continuation get retry")
 
 	flag.Parse()
 }
@@ -62,8 +64,11 @@ func main() {
 	var transport http.RoundTripper = http.DefaultTransport
 
 	if ContinuationGetInterval > 0 {
-		transport = httpseek.NewMustReaderTransport(transport, func(r *http.Request, err error) error {
-			logger.Println("Retry cache", r.URL)
+		transport = httpseek.NewMustReaderTransport(transport, func(r *http.Request, retry int, err error) error {
+			if ContinuationGetRetry > 0 && retry >= ContinuationGetRetry {
+				return err
+			}
+			logger.Println("Retry cache", r.URL, retry, err)
 			time.Sleep(ContinuationGetInterval)
 			return nil
 		})

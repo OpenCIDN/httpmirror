@@ -4,7 +4,7 @@ go 1.21
 
 require (
 	github.com/minio/minio-go/v7 v7.0.66
-	github.com/wzshiming/httpseek v0.0.0-20240122110938-0533c4b2d7c5
+	github.com/wzshiming/httpseek v0.1.0
 )
 
 require (

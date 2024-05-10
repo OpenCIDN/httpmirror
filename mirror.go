@@ -111,14 +111,15 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	closeValue, loaded := m.mut.LoadOrStore(u, make(chan struct{}))
 	closeCh := closeValue.(chan struct{})
-	if loaded {
+	for loaded {
 		select {
 		case <-ctx.Done():
 			m.errorResponse(w, r, ctx.Err())
+			return
 		case <-closeCh:
-			http.Redirect(w, r, u, http.StatusFound)
 		}
-		return
+		closeValue, loaded = m.mut.LoadOrStore(u, make(chan struct{}))
+		closeCh = closeValue.(chan struct{})
 	}
 
 	doneCache := func() {

@@ -163,7 +163,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 		sourceSize := sourceInfo.Size()
 		cacheSize := cacheInfo.Size()
-		if cacheSize != 0 && (sourceSize == 0 || sourceSize == cacheSize) {
+		if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
 			http.Redirect(w, r, u, http.StatusFound)
 			doneCache()
 			return

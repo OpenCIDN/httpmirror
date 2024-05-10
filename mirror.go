@@ -223,7 +223,13 @@ func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFil
 	}
 	err = m.RemoteCache.Put(ctx, key, body)
 	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Cache Error", cacheFile, contentLength, err)
+		}
 		return err
+	}
+	if m.Logger != nil {
+		m.Logger.Println("Cached", cacheFile, contentLength)
 	}
 
 	return nil

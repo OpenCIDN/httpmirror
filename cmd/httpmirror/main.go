@@ -2,12 +2,13 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/spf13/pflag"
 
 	"github.com/wzshiming/httpmirror"
 	"github.com/wzshiming/httpmirror/minio"
@@ -25,21 +26,23 @@ var (
 	checkSyncTimeout        time.Duration
 	ContinuationGetInterval time.Duration
 	ContinuationGetRetry    int
+	BlockSuffix             []string
 )
 
 func init() {
-	flag.StringVar(&address, "address", ":8080", "listen on the address")
-	flag.StringVar(&endpoint, "s3-endpoint", "", "endpoint")
-	flag.StringVar(&bucket, "s3-bucket", "", "bucket")
-	flag.StringVar(&accessKeyID, "s3-access-key-id", "", "access key id")
-	flag.StringVar(&accessKeySecret, "s3-access-key-secret", "", "access key secret")
-	flag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
-	flag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
-	flag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
-	flag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
-	flag.IntVar(&ContinuationGetRetry, "continuation-get-retry", 0, "continuation get retry")
+	pflag.StringVar(&address, "address", ":8080", "listen on the address")
+	pflag.StringVar(&endpoint, "s3-endpoint", "", "endpoint")
+	pflag.StringVar(&bucket, "s3-bucket", "", "bucket")
+	pflag.StringVar(&accessKeyID, "s3-access-key-id", "", "access key id")
+	pflag.StringVar(&accessKeySecret, "s3-access-key-secret", "", "access key secret")
+	pflag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
+	pflag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
+	pflag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
+	pflag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
+	pflag.IntVar(&ContinuationGetRetry, "continuation-get-retry", 0, "continuation get retry")
+	pflag.StringSliceVar(&BlockSuffix, "block-suffix", nil, "Block source suffix")
 
-	flag.Parse()
+	pflag.Parse()
 }
 
 func main() {
@@ -92,6 +95,7 @@ func main() {
 		},
 		CheckSyncTimeout:  checkSyncTimeout,
 		HostFromFirstPath: hostFromFirstPath,
+		BlockSuffix:       BlockSuffix,
 	}
 
 	logger.Println("listen on", address)

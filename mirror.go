@@ -22,7 +22,7 @@ type MirrorHandler struct {
 	RedirectLinks func(p string) (string, bool)
 	// BaseDomain is the domain name suffix
 	BaseDomain string
-	// Client  is used without the connect method
+	// Client is used without the connect method
 	Client *http.Client
 	// ProxyDial specifies the optional proxyDial function for
 	// establishing the transport connection.
@@ -35,6 +35,9 @@ type MirrorHandler struct {
 	CheckSyncTimeout time.Duration
 	// HostFromFirstPath is the host from the first path
 	HostFromFirstPath bool
+
+	// BlockSuffix is for block some source
+	BlockSuffix []string
 
 	mut sync.Map
 }
@@ -50,6 +53,15 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := r.URL.Path
+	if len(m.BlockSuffix) != 0 {
+		for _, suffix := range m.BlockSuffix {
+			if strings.HasSuffix(path, suffix) {
+				http.Error(w, "Forbidden", http.StatusForbidden)
+				return
+			}
+		}
+	}
+
 	if len(path) == 0 || strings.HasSuffix(path, "/") {
 		m.notFoundResponse(w, r)
 		return

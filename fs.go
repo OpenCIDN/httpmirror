@@ -4,6 +4,8 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"net/url"
+	"time"
 )
 
 type FS interface {
@@ -12,4 +14,6 @@ type FS interface {
 	Get(ctx context.Context, p string) (f io.ReadCloser, err error)
 	Put(ctx context.Context, p string, f io.Reader) (err error)
 	Del(ctx context.Context, p string) error
+
+	PresignedGet(ctx context.Context, p string, expires time.Duration) (u *url.URL, err error)
 }

@@ -20,6 +20,8 @@ type MirrorHandler struct {
 	RemoteCache FS
 	// RedirectLinks is the redirect link
 	RedirectLinks func(p string) (string, bool)
+	// LinkExpires is the expires of links
+	LinkExpires time.Duration
 	// BaseDomain is the domain name suffix
 	BaseDomain string
 	// Client is used without the connect method
@@ -112,6 +114,34 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, u, file string) {
+	expires := m.LinkExpires
+	if expires == 0 {
+		http.Redirect(rw, r, u, http.StatusFound)
+		return
+	}
+
+	url, err := m.RemoteCache.PresignedGet(context.Background(), file, expires)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Presigned Get", file, err)
+		}
+		http.Redirect(rw, r, u, http.StatusFound)
+		return
+	}
+
+	if url.RawQuery == "" {
+		if m.Logger != nil {
+			m.Logger.Println("Presigned Get is not work", file, url)
+		}
+		http.Redirect(rw, r, u, http.StatusFound)
+		return
+	}
+
+	http.Redirect(rw, r, url.String(), http.StatusFound)
+	return
+}
+
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	file := path.Join(r.Host, r.URL.Path)
@@ -155,7 +185,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if m.CheckSyncTimeout == 0 {
-			http.Redirect(w, r, u, http.StatusFound)
+			m.redirect(w, r, u, file)
 			doneCache()
 			return
 		}
@@ -167,7 +197,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			if m.Logger != nil {
 				m.Logger.Println("Source Miss", u, err)
 			}
-			http.Redirect(w, r, u, http.StatusFound)
+			m.redirect(w, r, u, file)
 			doneCache()
 			return
 		}
@@ -176,7 +206,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		sourceSize := sourceInfo.Size()
 		cacheSize := cacheInfo.Size()
 		if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
-			http.Redirect(w, r, u, http.StatusFound)
+			m.redirect(w, r, u, file)
 			doneCache()
 			return
 		}
@@ -207,7 +237,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			m.errorResponse(w, r, err)
 			return
 		}
-		http.Redirect(w, r, u, http.StatusFound)
+		m.redirect(w, r, u, file)
 		return
 	}
 }

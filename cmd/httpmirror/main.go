@@ -22,6 +22,7 @@ var (
 	accessKeyID             string
 	accessKeySecret         string
 	redirectLinks           string
+	linkExpires             time.Duration
 	hostFromFirstPath       bool
 	checkSyncTimeout        time.Duration
 	ContinuationGetInterval time.Duration
@@ -36,6 +37,7 @@ func init() {
 	pflag.StringVar(&accessKeyID, "s3-access-key-id", "", "access key id")
 	pflag.StringVar(&accessKeySecret, "s3-access-key-secret", "", "access key secret")
 	pflag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
+	pflag.DurationVar(&linkExpires, "s3-link-expires", 0, "link expires")
 	pflag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	pflag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 	pflag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
@@ -93,6 +95,7 @@ func main() {
 		RedirectLinks: func(p string) (string, bool) {
 			return fmt.Sprintf("%s/%s", redirectLinks, p), true
 		},
+		LinkExpires:       linkExpires,
 		CheckSyncTimeout:  checkSyncTimeout,
 		HostFromFirstPath: hostFromFirstPath,
 		BlockSuffix:       BlockSuffix,

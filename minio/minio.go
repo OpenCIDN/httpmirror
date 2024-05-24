@@ -4,8 +4,10 @@ import (
 	"context"
 	"io"
 	"io/fs"
+	"net/url"
 	"path"
 	"path/filepath"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -84,6 +86,14 @@ func (m *Minio) Get(ctx context.Context, p string) (f io.ReadCloser, err error) 
 		return nil, err
 	}
 	return object, nil
+}
+
+func (m *Minio) PresignedGet(ctx context.Context, p string, expires time.Duration) (u *url.URL, err error) {
+	u, err = m.client.PresignedGetObject(ctx, m.bucket, m.relPath(p), expires, nil)
+	if err != nil {
+		return nil, err
+	}
+	return u, nil
 }
 
 func (m *Minio) Put(ctx context.Context, p string, f io.Reader) (err error) {

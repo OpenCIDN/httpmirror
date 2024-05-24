@@ -2,11 +2,14 @@ package local
 
 import (
 	"context"
+	"errors"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/wzshiming/httpmirror"
 )
@@ -53,6 +56,12 @@ func (l Local) Stat(ctx context.Context, p string) (fs.FileInfo, error) {
 
 func (l Local) Get(ctx context.Context, p string) (io.ReadCloser, error) {
 	return os.Open(l.relPath(p))
+}
+
+var errUnsupportedPresigned = errors.New("unsupported presigned")
+
+func (l Local) PresignedGet(ctx context.Context, p string, expires time.Duration) (u *url.URL, err error) {
+	return nil, errUnsupportedPresigned
 }
 
 func (l Local) Put(ctx context.Context, p string, f io.Reader) (err error) {

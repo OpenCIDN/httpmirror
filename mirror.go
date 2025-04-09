@@ -142,9 +142,15 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, u, fil
 	return
 }
 
+func pathEscape(p string) string {
+	p = strings.ReplaceAll(p, "+", "%2B")
+	p = strings.ReplaceAll(p, " ", "%20")
+	return p
+}
+
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	file := path.Join(r.Host, r.URL.Path)
+	file := path.Join(r.Host, pathEscape(r.URL.Path))
 	u, ok := m.RedirectLinks(file)
 	if !ok {
 		m.notFoundResponse(w, r)

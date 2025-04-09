@@ -1,12 +1,11 @@
 module github.com/wzshiming/httpmirror
 
-go 1.21
-toolchain go1.24.1
+go 1.23.0
 
 require (
 	github.com/minio/minio-go/v7 v7.0.66
 	github.com/spf13/pflag v1.0.5
-	github.com/wzshiming/httpseek v0.1.0
+	github.com/wzshiming/httpseek v0.5.0
 )
 
 require (

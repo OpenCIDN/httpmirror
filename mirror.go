@@ -3,6 +3,7 @@ package httpmirror
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -11,15 +12,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/minio-go/v7/pkg/s3utils"
+	"github.com/wzshiming/sss"
 )
 
 // MirrorHandler mirror handler
 type MirrorHandler struct {
 	// RemoteCache is the cache of the remote file system
-	RemoteCache FS
-	// RedirectLinks is the redirect link
-	RedirectLinks func(p string) (string, bool)
+	RemoteCache *sss.SSS
 	// LinkExpires is the expires of links
 	LinkExpires time.Duration
 	// BaseDomain is the domain name suffix
@@ -82,7 +81,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path = path
 	}
 
-	if !strings.Contains(host, ".") || !s3utils.IsValidDomain(host) {
+	if !strings.Contains(host, ".") || !isValidDomain(host) {
 		m.notFoundResponse(w, r)
 		return
 	}
@@ -105,7 +104,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		m.Logger.Println("Request", r.URL)
 	}
 
-	if m.RemoteCache == nil || m.RedirectLinks == nil {
+	if m.RemoteCache == nil {
 		m.directResponse(w, r)
 		return
 	}
@@ -114,50 +113,26 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, u, file string) {
+func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string) {
 	expires := m.LinkExpires
-	if expires == 0 {
-		http.Redirect(rw, r, u, http.StatusFound)
-		return
-	}
 
-	url, err := m.RemoteCache.PresignedGet(context.Background(), file, expires)
+	url, err := m.RemoteCache.SignGet(file, expires)
 	if err != nil {
 		if m.Logger != nil {
-			m.Logger.Println("Presigned Get", file, err)
+			m.Logger.Println("Sign Get", file, err)
 		}
-		http.Redirect(rw, r, u, http.StatusFound)
 		return
 	}
 
-	if url.RawQuery == "" {
-		if m.Logger != nil {
-			m.Logger.Println("Presigned Get is not work", file, url)
-		}
-		http.Redirect(rw, r, u, http.StatusFound)
-		return
-	}
-
-	http.Redirect(rw, r, url.String(), http.StatusFound)
+	http.Redirect(rw, r, url, http.StatusFound)
 	return
-}
-
-func pathEscape(p string) string {
-	p = strings.ReplaceAll(p, "+", "%2B")
-	p = strings.ReplaceAll(p, " ", "%20")
-	return p
 }
 
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	file := path.Join(r.Host, pathEscape(r.URL.Path))
-	u, ok := m.RedirectLinks(file)
-	if !ok {
-		m.notFoundResponse(w, r)
-		return
-	}
+	file := path.Join(r.Host, r.URL.EscapedPath())
 
-	closeValue, loaded := m.mut.LoadOrStore(u, make(chan struct{}))
+	closeValue, loaded := m.mut.LoadOrStore(file, make(chan struct{}))
 	closeCh := closeValue.(chan struct{})
 	for loaded {
 		select {
@@ -166,12 +141,12 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			return
 		case <-closeCh:
 		}
-		closeValue, loaded = m.mut.LoadOrStore(u, make(chan struct{}))
+		closeValue, loaded = m.mut.LoadOrStore(file, make(chan struct{}))
 		closeCh = closeValue.(chan struct{})
 	}
 
 	doneCache := func() {
-		m.mut.Delete(u)
+		m.mut.Delete(file)
 		close(closeCh)
 	}
 
@@ -183,15 +158,15 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if m.Logger != nil {
-			m.Logger.Println("Cache Miss", u, err)
+			m.Logger.Println("Cache Miss", file, err)
 		}
 	} else {
 		if m.Logger != nil {
-			m.Logger.Println("Cache Hit", u)
+			m.Logger.Println("Cache Hit", file)
 		}
 
 		if m.CheckSyncTimeout == 0 {
-			m.redirect(w, r, u, file)
+			m.redirect(w, r, file)
 			doneCache()
 			return
 		}
@@ -201,9 +176,9 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			sourceCancel()
 			if m.Logger != nil {
-				m.Logger.Println("Source Miss", u, err)
+				m.Logger.Println("Source Miss", file, err)
 			}
-			m.redirect(w, r, u, file)
+			m.redirect(w, r, file)
 			doneCache()
 			return
 		}
@@ -212,13 +187,13 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		sourceSize := sourceInfo.Size()
 		cacheSize := cacheInfo.Size()
 		if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
-			m.redirect(w, r, u, file)
+			m.redirect(w, r, file)
 			doneCache()
 			return
 		}
 
 		if m.Logger != nil {
-			m.Logger.Println("Source change", u, sourceSize, cacheSize)
+			m.Logger.Println("Source change", file, sourceSize, cacheSize)
 		}
 	}
 
@@ -226,7 +201,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer doneCache()
-		err = m.cacheFile(context.Background(), file, r.URL.String(), u)
+		err = m.cacheFile(context.Background(), file, r.URL.String(), file)
 		errCh <- err
 	}()
 
@@ -243,7 +218,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			m.errorResponse(w, r, err)
 			return
 		}
-		m.redirect(w, r, u, file)
+		m.redirect(w, r, file)
 		return
 	}
 }
@@ -262,17 +237,40 @@ func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFil
 		return ErrNotOK
 	}
 
-	if contentLength > 0 {
-		body = io.LimitReader(body, contentLength)
-	}
-
 	if m.Logger != nil {
 		m.Logger.Println("Cache", cacheFile, contentLength)
 	}
-	err = m.RemoteCache.Put(ctx, key, body)
+	fw, err := m.RemoteCache.Writer(ctx, key)
 	if err != nil {
 		if m.Logger != nil {
-			m.Logger.Println("Cache Error", cacheFile, contentLength, err)
+			m.Logger.Println("Cache writer error", cacheFile, contentLength, err)
+		}
+		return err
+	}
+	defer fw.Close()
+
+	n, err := io.Copy(fw, body)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Cache copy error", cacheFile, contentLength, err)
+		}
+		_ = fw.Cancel(context.Background())
+		return err
+	}
+
+	if contentLength > 0 && n != contentLength {
+		err = fmt.Errorf("copied %d bytes, expected %d", n, contentLength)
+		if m.Logger != nil {
+			m.Logger.Println("Cache copy error", cacheFile, err)
+		}
+		_ = fw.Cancel(context.Background())
+		return err
+	}
+
+	err = fw.Commit(ctx)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Cache Commit error", cacheFile, err)
 		}
 		return err
 	}
@@ -361,4 +359,32 @@ func (m *MirrorHandler) proxyDial(ctx context.Context, network, address string) 
 		proxyDial = dialer.DialContext
 	}
 	return proxyDial(ctx, network, address)
+}
+
+// isValidDomain validates if input string is a valid domain name.
+func isValidDomain(host string) bool {
+	// See RFC 1035, RFC 3696.
+	host = strings.TrimSpace(host)
+	if len(host) == 0 || len(host) > 255 {
+		return false
+	}
+	// host cannot start or end with "-"
+	if host[len(host)-1:] == "-" || host[:1] == "-" {
+		return false
+	}
+	// host cannot start or end with "_"
+	if host[len(host)-1:] == "_" || host[:1] == "_" {
+		return false
+	}
+	// host cannot start with a "."
+	if host[:1] == "." {
+		return false
+	}
+	// All non alphanumeric characters are invalid.
+	if strings.ContainsAny(host, "`~!@#$%^&*()+={}[]|\\\"';:><?/") {
+		return false
+	}
+	// No need to regexp match, since the list is non-exhaustive.
+	// We let it valid and fail later.
+	return true
 }

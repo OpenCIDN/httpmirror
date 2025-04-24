@@ -2,7 +2,6 @@ package main
 
 import (
 	"errors"
-	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -11,17 +10,13 @@ import (
 	"github.com/spf13/pflag"
 
 	"github.com/wzshiming/httpmirror"
-	"github.com/wzshiming/httpmirror/minio"
 	"github.com/wzshiming/httpseek"
+	"github.com/wzshiming/sss"
 )
 
 var (
 	address                 string
-	endpoint                string
-	bucket                  string
-	accessKeyID             string
-	accessKeySecret         string
-	redirectLinks           string
+	storageURL              string
 	linkExpires             time.Duration
 	hostFromFirstPath       bool
 	checkSyncTimeout        time.Duration
@@ -32,12 +27,8 @@ var (
 
 func init() {
 	pflag.StringVar(&address, "address", ":8080", "listen on the address")
-	pflag.StringVar(&endpoint, "s3-endpoint", "", "endpoint")
-	pflag.StringVar(&bucket, "s3-bucket", "", "bucket")
-	pflag.StringVar(&accessKeyID, "s3-access-key-id", "", "access key id")
-	pflag.StringVar(&accessKeySecret, "s3-access-key-secret", "", "access key secret")
-	pflag.StringVar(&redirectLinks, "s3-redirect-links", "", "redirect links")
-	pflag.DurationVar(&linkExpires, "s3-link-expires", 0, "link expires")
+	pflag.StringVar(&storageURL, "storage-url", "", "storage url")
+	pflag.DurationVar(&linkExpires, "link-expires", 24*time.Hour, "link expires")
 	pflag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	pflag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 	pflag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
@@ -50,15 +41,10 @@ func init() {
 func main() {
 	logger := log.New(os.Stderr, "[http mirror] ", log.LstdFlags)
 
-	var client httpmirror.FS
+	var client *sss.SSS
 
-	if endpoint != "" {
-		c, err := minio.NewMinio(minio.Config{
-			Endpoint:        endpoint,
-			Bucket:          bucket,
-			AccessKeyID:     accessKeyID,
-			AccessKeySecret: accessKeySecret,
-		})
+	if storageURL != "" {
+		c, err := sss.NewSSS(sss.WithURL(storageURL))
 		if err != nil {
 			logger.Println("failed to create minio client:", err)
 			os.Exit(1)
@@ -90,11 +76,8 @@ func main() {
 			},
 			Transport: transport,
 		},
-		Logger:      logger,
-		RemoteCache: client,
-		RedirectLinks: func(p string) (string, bool) {
-			return fmt.Sprintf("%s/%s", redirectLinks, p), true
-		},
+		Logger:            logger,
+		RemoteCache:       client,
 		LinkExpires:       linkExpires,
 		CheckSyncTimeout:  checkSyncTimeout,
 		HostFromFirstPath: hostFromFirstPath,

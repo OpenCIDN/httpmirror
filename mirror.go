@@ -113,15 +113,42 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
-func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string) {
+func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
 	expires := m.LinkExpires
-
-	url, err := m.RemoteCache.SignGet(file, expires)
-	if err != nil {
-		if m.Logger != nil {
-			m.Logger.Println("Sign Get", file, err)
+	var url string
+	var err error
+	if r.Method == http.MethodHead {
+		if info == nil {
+			info, err = m.RemoteCache.Stat(r.Context(), file)
+			if err != nil {
+				if m.Logger != nil {
+					m.Logger.Println("Stat", file, err)
+				}
+			}
 		}
-		return
+		if info != nil {
+			rw.Header().Set("Content-Type", "application/octet-stream")
+			rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
+			rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
+			rw.WriteHeader(http.StatusOK)
+			return
+		} else {
+			url, err = m.RemoteCache.SignHead(file, expires)
+			if err != nil {
+				if m.Logger != nil {
+					m.Logger.Println("Sign Head", file, err)
+				}
+				return
+			}
+		}
+	} else {
+		url, err = m.RemoteCache.SignGet(file, expires)
+		if err != nil {
+			if m.Logger != nil {
+				m.Logger.Println("Sign Get", file, err)
+			}
+			return
+		}
 	}
 
 	http.Redirect(rw, r, url, http.StatusFound)
@@ -166,7 +193,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if m.CheckSyncTimeout == 0 {
-			m.redirect(w, r, file)
+			m.redirect(w, r, file, cacheInfo)
 			doneCache()
 			return
 		}
@@ -178,7 +205,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			if m.Logger != nil {
 				m.Logger.Println("Source Miss", file, err)
 			}
-			m.redirect(w, r, file)
+			m.redirect(w, r, file, cacheInfo)
 			doneCache()
 			return
 		}
@@ -187,7 +214,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		sourceSize := sourceInfo.Size()
 		cacheSize := cacheInfo.Size()
 		if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
-			m.redirect(w, r, file)
+			m.redirect(w, r, file, cacheInfo)
 			doneCache()
 			return
 		}
@@ -218,7 +245,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			m.errorResponse(w, r, err)
 			return
 		}
-		m.redirect(w, r, file)
+		m.redirect(w, r, file, nil)
 		return
 	}
 }

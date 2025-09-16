@@ -2,6 +2,8 @@ package httpmirror
 
 import (
 	"context"
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +14,13 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OpenCIDN/cidn/pkg/apis/task/v1alpha1"
+	"github.com/OpenCIDN/cidn/pkg/clientset/versioned"
+	informers "github.com/OpenCIDN/cidn/pkg/informers/externalversions/task/v1alpha1"
 	"github.com/wzshiming/sss"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 )
 
 // MirrorHandler mirror handler
@@ -41,6 +49,10 @@ type MirrorHandler struct {
 	BlockSuffix []string
 
 	mut sync.Map
+
+	CIDNClient       versioned.Interface
+	CIDNBlobInformer informers.BlobInformer
+	CIDNDestination  string
 }
 
 type Logger interface {
@@ -198,29 +210,35 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		sourceCtx, sourceCancel := context.WithTimeout(ctx, m.CheckSyncTimeout)
-		sourceInfo, err := httpHead(sourceCtx, m.client(), r.URL.String())
-		if err != nil {
-			sourceCancel()
-			if m.Logger != nil {
-				m.Logger.Println("Source Miss", file, err)
+		if m.CIDNClient == nil {
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, m.CheckSyncTimeout)
+			sourceInfo, err := httpHead(sourceCtx, m.client(), r.URL.String())
+			if err != nil {
+				sourceCancel()
+				if m.Logger != nil {
+					m.Logger.Println("Source Miss", file, err)
+				}
+				m.redirect(w, r, file, cacheInfo)
+				doneCache()
+				return
 			}
+			sourceCancel()
+
+			sourceSize := sourceInfo.Size()
+			cacheSize := cacheInfo.Size()
+			if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
+				m.redirect(w, r, file, cacheInfo)
+				doneCache()
+				return
+			}
+
+			if m.Logger != nil {
+				m.Logger.Println("Source change", file, sourceSize, cacheSize)
+			}
+		} else {
 			m.redirect(w, r, file, cacheInfo)
 			doneCache()
 			return
-		}
-		sourceCancel()
-
-		sourceSize := sourceInfo.Size()
-		cacheSize := cacheInfo.Size()
-		if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
-			m.redirect(w, r, file, cacheInfo)
-			doneCache()
-			return
-		}
-
-		if m.Logger != nil {
-			m.Logger.Println("Source change", file, sourceSize, cacheSize)
 		}
 	}
 
@@ -228,7 +246,12 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer doneCache()
-		err = m.cacheFile(context.Background(), r.URL.String(), file)
+		var err error
+		if m.CIDNClient != nil {
+			err = m.cacheFileWithCIDN(context.Background(), r.URL.String(), file)
+		} else {
+			err = m.cacheFile(context.Background(), r.URL.String(), file)
+		}
 		errCh <- err
 	}()
 
@@ -247,6 +270,133 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 		m.redirect(w, r, file, nil)
 		return
+	}
+}
+
+func getBlobName(urlPath string) string {
+	m := md5.Sum([]byte(urlPath))
+	return hex.EncodeToString(m[:])
+}
+
+func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cacheFile string) error {
+	blobs := m.CIDNClient.TaskV1alpha1().Blobs()
+	name := getBlobName(cacheFile)
+
+	blob, err := m.CIDNBlobInformer.Lister().Get(name)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			if m.Logger != nil {
+				m.Logger.Println("Error getting blob from informer:", err)
+			}
+			return err
+		}
+
+		blob, err = blobs.Create(ctx, &v1alpha1.Blob{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: name,
+				Annotations: map[string]string{
+					v1alpha1.BlobDisplayNameAnnotation: sourceFile,
+				},
+			},
+			Spec: v1alpha1.BlobSpec{
+				MaximumRunning:   10,
+				MinimumChunkSize: 256 * 1024 * 1024,
+				Source: []v1alpha1.BlobSource{
+					{
+						URL: sourceFile,
+					},
+				},
+				Destination: []v1alpha1.BlobDestination{
+					{
+						Name:         m.CIDNDestination,
+						Path:         cacheFile,
+						SkipIfExists: true,
+					},
+				},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil &&
+			!apierrors.IsAlreadyExists(err) {
+			return err
+		}
+	}
+
+	switch blob.Status.Phase {
+	case v1alpha1.BlobPhaseSucceeded:
+		return nil
+	case v1alpha1.BlobPhaseFailed:
+		errorMsg := "blob sync failed"
+		for _, condition := range blob.Status.Conditions {
+			if condition.Message != "" {
+				errorMsg = condition.Message
+				break
+			}
+		}
+		return fmt.Errorf("failed: %s: %w", errorMsg, ErrNotOK)
+	}
+
+	// Create a channel to receive blob status updates
+	statusChan := make(chan *v1alpha1.Blob, 1)
+	defer close(statusChan)
+
+	// Add event handler to watch for blob status changes
+	handler := cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			blob, ok := obj.(*v1alpha1.Blob)
+			if !ok {
+				return
+			}
+			if blob.Name == name {
+				statusChan <- blob
+			}
+		},
+		UpdateFunc: func(oldObj, newObj interface{}) {
+			oldBlob, ok := oldObj.(*v1alpha1.Blob)
+			if !ok {
+				return
+			}
+			newBlob, ok := newObj.(*v1alpha1.Blob)
+			if !ok {
+				return
+			}
+			if newBlob.Name == name && oldBlob.Status.Phase != newBlob.Status.Phase {
+				statusChan <- newBlob
+			}
+		},
+		DeleteFunc: func(obj interface{}) {
+			close(statusChan)
+		},
+	}
+
+	rer, err := m.CIDNBlobInformer.Informer().AddEventHandler(handler)
+	if err != nil {
+		return err
+	}
+
+	defer m.CIDNBlobInformer.Informer().RemoveEventHandler(rer)
+
+	for {
+		select {
+		case updatedBlob, ok := <-statusChan:
+			if !ok {
+				return fmt.Errorf("blob was cancel before completion")
+			}
+			switch updatedBlob.Status.Phase {
+			case v1alpha1.BlobPhaseSucceeded:
+				return nil
+			case v1alpha1.BlobPhaseFailed:
+				errorMsg := "blob sync failed"
+				for _, condition := range updatedBlob.Status.Conditions {
+					if condition.Message != "" {
+						errorMsg = condition.Message
+						break
+					}
+				}
+				return fmt.Errorf("failed: %s: %w", errorMsg, ErrNotOK)
+			}
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 

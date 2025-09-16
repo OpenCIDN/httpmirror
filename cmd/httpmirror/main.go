@@ -9,7 +9,7 @@ import (
 
 	"github.com/spf13/pflag"
 
-	"github.com/wzshiming/httpmirror"
+	"github.com/OpenCIDN/httpmirror"
 	"github.com/wzshiming/httpseek"
 	"github.com/wzshiming/sss"
 )

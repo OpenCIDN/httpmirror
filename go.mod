@@ -1,4 +1,4 @@
-module github.com/wzshiming/httpmirror
+module github.com/OpenCIDN/httpmirror
 
 go 1.24
 

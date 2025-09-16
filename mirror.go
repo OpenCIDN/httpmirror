@@ -228,7 +228,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer doneCache()
-		err = m.cacheFile(context.Background(), file, r.URL.String(), file)
+		err = m.cacheFile(context.Background(), r.URL.String(), file)
 		errCh <- err
 	}()
 
@@ -250,7 +250,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFile string) error {
+func (m *MirrorHandler) cacheFile(ctx context.Context, sourceFile, cacheFile string) error {
 	resp, info, err := httpGet(ctx, m.client(), sourceFile)
 	if err != nil {
 		return err
@@ -267,7 +267,7 @@ func (m *MirrorHandler) cacheFile(ctx context.Context, key, sourceFile, cacheFil
 	if m.Logger != nil {
 		m.Logger.Println("Cache", cacheFile, contentLength)
 	}
-	fw, err := m.RemoteCache.Writer(ctx, key)
+	fw, err := m.RemoteCache.Writer(ctx, cacheFile)
 	if err != nil {
 		if m.Logger != nil {
 			m.Logger.Println("Cache writer error", cacheFile, contentLength, err)

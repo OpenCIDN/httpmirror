@@ -235,10 +235,6 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			if m.Logger != nil {
 				m.Logger.Println("Source change", file, sourceSize, cacheSize)
 			}
-		} else {
-			m.redirect(w, r, file, cacheInfo)
-			doneCache()
-			return
 		}
 	}
 
@@ -300,7 +296,7 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 			},
 			Spec: v1alpha1.BlobSpec{
 				MaximumRunning:   10,
-				MinimumChunkSize: 256 * 1024 * 1024,
+				MinimumChunkSize: 128 * 1024 * 1024,
 				Source: []v1alpha1.BlobSource{
 					{
 						URL: sourceFile,

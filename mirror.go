@@ -360,7 +360,7 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			close(statusChan)
+			statusChan <- nil
 		},
 	}
 
@@ -376,6 +376,9 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 		case updatedBlob, ok := <-statusChan:
 			if !ok {
 				return fmt.Errorf("blob was cancel before completion")
+			}
+			if updatedBlob == nil {
+				return fmt.Errorf("blob was deleted before completion")
 			}
 			switch updatedBlob.Status.Phase {
 			case v1alpha1.BlobPhaseSucceeded:

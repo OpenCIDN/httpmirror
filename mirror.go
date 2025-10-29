@@ -84,6 +84,13 @@ type MirrorHandler struct {
 	// Example: []string{".exe", ".msi"}
 	BlockSuffix []string
 
+	// NoRedirect disables HTTP redirects to signed URLs for cached content.
+	// When true, the handler serves cached content directly instead of
+	// redirecting clients to signed URLs from RemoteCache.
+	// This is useful for clients that don't handle redirects well or when
+	// you want the proxy to serve all traffic directly.
+	NoRedirect bool
+
 	mut sync.Map
 
 	// CIDNClient is the Kubernetes client for CIDN integration.
@@ -187,6 +194,14 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	return
 }
 
+func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
+	if m.NoRedirect {
+		m.serveFromCache(rw, r, file, info)
+	} else {
+		m.redirect(rw, r, file, info)
+	}
+}
+
 func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
 	expires := m.LinkExpires
 	var url string
@@ -229,6 +244,56 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 	return
 }
 
+// serveFromCache serves content directly from the remote cache without redirecting.
+// It reads the file from RemoteCache and streams it to the client.
+func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
+	ctx := r.Context()
+	if r.Method == http.MethodHead {
+		// Get file info if not already provided
+		if info == nil {
+			var err error
+			info, err = m.RemoteCache.Stat(ctx, file)
+			if err != nil {
+				if m.Logger != nil {
+					m.Logger.Println("Stat error for direct serve", file, err)
+				}
+				m.errorResponse(rw, r, err)
+				return
+			}
+		}
+
+		rw.WriteHeader(http.StatusOK)
+		rw.Header().Set("Content-Type", "application/octet-stream")
+		rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
+		rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
+
+		return
+	}
+
+	// For GET requests, read and stream the content
+	reader, info, err := m.RemoteCache.ReaderAndInfo(ctx, file)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Reader error for direct serve", file, err)
+		}
+		m.errorResponse(rw, r, err)
+		return
+	}
+	defer reader.Close()
+
+	rw.WriteHeader(http.StatusOK)
+	rw.Header().Set("Content-Type", "application/octet-stream")
+	rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
+	rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
+
+	_, err = io.Copy(rw, reader)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Copy error for direct serve", file, err)
+		}
+	}
+}
+
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	file := path.Join(r.Host, r.URL.EscapedPath())
@@ -267,7 +332,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if m.CheckSyncTimeout == 0 {
-			m.redirect(w, r, file, cacheInfo)
+			m.responseCache(w, r, file, cacheInfo)
 			doneCache()
 			return
 		}
@@ -280,7 +345,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 				if m.Logger != nil {
 					m.Logger.Println("Source Miss", file, err)
 				}
-				m.redirect(w, r, file, cacheInfo)
+				m.responseCache(w, r, file, cacheInfo)
 				doneCache()
 				return
 			}
@@ -289,7 +354,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			sourceSize := sourceInfo.Size()
 			cacheSize := cacheInfo.Size()
 			if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
-				m.redirect(w, r, file, cacheInfo)
+				m.responseCache(w, r, file, cacheInfo)
 				doneCache()
 				return
 			}
@@ -326,7 +391,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			m.errorResponse(w, r, err)
 			return
 		}
-		m.redirect(w, r, file, nil)
+		m.responseCache(w, r, file, nil)
 		return
 	}
 }
@@ -552,7 +617,11 @@ func (m *MirrorHandler) directResponse(w http.ResponseWriter, r *http.Request) {
 		}
 		_, err = io.Copy(w, body)
 		if err != nil {
-			m.errorResponse(w, r, err)
+			if !errors.Is(err, io.EOF) {
+				if m.Logger != nil {
+					m.Logger.Println("Copy error", r.URL, err)
+				}
+			}
 			return
 		}
 	}

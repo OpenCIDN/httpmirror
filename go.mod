@@ -6,13 +6,13 @@ require (
 	github.com/OpenCIDN/cidn v0.0.5
 	github.com/spf13/pflag v1.0.6
 	github.com/wzshiming/httpseek v0.5.0
-	github.com/wzshiming/sss v0.1.0
+	github.com/wzshiming/sss v0.4.0
 	k8s.io/apimachinery v0.34.1
 	k8s.io/client-go v0.34.1
 )
 
 require (
-	github.com/aws/aws-sdk-go v1.55.7 // indirect
+	github.com/aws/aws-sdk-go v1.55.8 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
 	github.com/emicklei/go-restful/v3 v3.12.2 // indirect
 	github.com/fxamacker/cbor/v2 v2.9.0 // indirect

@@ -121,7 +121,7 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 		select {
 		case updatedBlob, ok := <-statusChan:
 			if !ok {
-				return fmt.Errorf("blob was cancel before completion")
+				return fmt.Errorf("blob was canceled before completion")
 			}
 			if updatedBlob == nil {
 				return fmt.Errorf("blob was deleted before completion")

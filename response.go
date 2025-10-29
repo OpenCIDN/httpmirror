@@ -119,10 +119,10 @@ func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, 
 			}
 		}
 
-		rw.WriteHeader(http.StatusOK)
 		rw.Header().Set("Content-Type", "application/octet-stream")
 		rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
 		rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
+		rw.WriteHeader(http.StatusOK)
 
 		return
 	}
@@ -138,10 +138,10 @@ func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, 
 	}
 	defer reader.Close()
 
-	rw.WriteHeader(http.StatusOK)
 	rw.Header().Set("Content-Type", "application/octet-stream")
 	rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
 	rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
+	rw.WriteHeader(http.StatusOK)
 
 	_, err = io.Copy(rw, reader)
 	if err != nil {

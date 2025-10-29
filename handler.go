@@ -162,7 +162,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			m.notFoundResponse(w, r)
 			return
 		}
-		host = host[:len(r.Host)-len(m.BaseDomain)]
+		host = host[:len(host)-len(m.BaseDomain)]
 	}
 
 	r.RequestURI = ""

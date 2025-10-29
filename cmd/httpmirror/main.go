@@ -27,6 +27,7 @@ var (
 	ContinuationGetInterval time.Duration
 	ContinuationGetRetry    int
 	BlockSuffix             []string
+	NoRedirect              bool
 
 	Kubeconfig            string
 	Master                string
@@ -42,6 +43,7 @@ func init() {
 	pflag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
 	pflag.IntVar(&ContinuationGetRetry, "continuation-get-retry", 0, "continuation get retry")
 	pflag.StringSliceVar(&BlockSuffix, "block-suffix", nil, "Block source suffix")
+	pflag.BoolVar(&NoRedirect, "no-redirect", false, "Serve cached content directly instead of redirecting to signed URLs")
 
 	pflag.StringVar(&Kubeconfig, "kubeconfig", Kubeconfig, "Path to the kubeconfig file to use")
 	pflag.StringVar(&Master, "master", Master, "The address of the Kubernetes API server")
@@ -94,6 +96,7 @@ func main() {
 		CheckSyncTimeout:  checkSyncTimeout,
 		HostFromFirstPath: hostFromFirstPath,
 		BlockSuffix:       BlockSuffix,
+		NoRedirect:        NoRedirect,
 	}
 
 	if (Kubeconfig != "" || Master != "") && storageURL != "" {

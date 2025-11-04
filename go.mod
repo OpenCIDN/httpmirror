@@ -3,7 +3,7 @@ module github.com/OpenCIDN/httpmirror
 go 1.25
 
 require (
-	github.com/OpenCIDN/cidn v0.0.26
+	github.com/OpenCIDN/cidn v0.0.28
 	github.com/spf13/pflag v1.0.6
 	github.com/wzshiming/httpseek v0.5.0
 	github.com/wzshiming/sss v0.4.0

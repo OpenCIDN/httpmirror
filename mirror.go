@@ -418,11 +418,12 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 			ObjectMeta: metav1.ObjectMeta{
 				Name: name,
 				Annotations: map[string]string{
-					v1alpha1.BlobDisplayNameAnnotation: sourceFile,
+					v1alpha1.WebuiDisplayNameAnnotation: sourceFile,
+					v1alpha1.ReleaseTTLAnnotation:       "1h",
 				},
 			},
 			Spec: v1alpha1.BlobSpec{
-				MaximumRunning:   10,
+				MaximumRunning:   3,
 				MinimumChunkSize: 128 * 1024 * 1024,
 				Source: []v1alpha1.BlobSource{
 					{

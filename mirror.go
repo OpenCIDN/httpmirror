@@ -133,15 +133,16 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.URL.Path = cleanPath(r.URL.Path)
 
-	path := r.URL.Path
-	if len(path) == 0 || strings.HasSuffix(path, "/") {
+	urlpath := r.URL.Path
+	if len(urlpath) == 0 || strings.HasSuffix(urlpath, "/") {
 		m.notFoundResponse(w, r)
 		return
 	}
 	if len(m.BlockSuffix) != 0 {
 		for _, suffix := range m.BlockSuffix {
-			if strings.HasSuffix(path, suffix) {
+			if strings.HasSuffix(urlpath, suffix) {
 				http.Error(w, "Forbidden", http.StatusForbidden)
 				return
 			}
@@ -150,16 +151,16 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	host := r.Host
 	if m.HostFromFirstPath {
-		paths := strings.Split(path[1:], "/")
+		paths := strings.Split(urlpath[1:], "/")
 		host = paths[0]
-		path = "/" + strings.Join(paths[1:], "/")
-		if path == "/" {
+		urlpath = "/" + strings.Join(paths[1:], "/")
+		if urlpath == "/" {
 			m.notFoundResponse(w, r)
 			return
 		}
 
 		r.Host = host
-		r.URL.Path = path
+		r.URL.Path = urlpath
 	}
 
 	if !strings.Contains(host, ".") || !isValidDomain(host) {

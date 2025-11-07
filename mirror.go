@@ -424,6 +424,7 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 			},
 			Spec: v1alpha1.BlobSpec{
 				MaximumRunning:   3,
+				MaximumPending:   1,
 				MinimumChunkSize: 128 * 1024 * 1024,
 				Source: []v1alpha1.BlobSource{
 					{
@@ -488,7 +489,13 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 			}
 		},
 		DeleteFunc: func(obj interface{}) {
-			statusChan <- nil
+			blob, ok := obj.(*v1alpha1.Blob)
+			if !ok {
+				return
+			}
+			if blob.Name == name {
+				statusChan <- nil
+			}
 		},
 	}
 

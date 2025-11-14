@@ -421,12 +421,14 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 				Annotations: map[string]string{
 					v1alpha1.WebuiDisplayNameAnnotation: sourceFile,
 					v1alpha1.ReleaseTTLAnnotation:       "1h",
+					v1alpha1.WebuiTagAnnotation:         "file",
 				},
 			},
 			Spec: v1alpha1.BlobSpec{
 				MaximumRunning:   3,
 				MaximumPending:   1,
 				MinimumChunkSize: 128 * 1024 * 1024,
+				MaximumRetry:     2,
 				Source: []v1alpha1.BlobSource{
 					{
 						URL: sourceFile,

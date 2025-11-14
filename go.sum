@@ -1,5 +1,5 @@
-github.com/OpenCIDN/cidn v0.0.32 h1:FUZ7IYDpiBaEfg8Yqrava0W9dHq0vn+rRyxOYPFOJj8=
-github.com/OpenCIDN/cidn v0.0.32/go.mod h1:9/xS0MugutF3ZMxyI6+7adnzpiDyLqsZ/7N0mRw8hek=
+github.com/OpenCIDN/cidn v0.0.66 h1:wD9u66FKBGuDw/mgOh/A6dxJXG7huPRJLIsqG42vZ6s=
+github.com/OpenCIDN/cidn v0.0.66/go.mod h1:9/xS0MugutF3ZMxyI6+7adnzpiDyLqsZ/7N0mRw8hek=
 github.com/aws/aws-sdk-go v1.55.8 h1:JRmEUbU52aJQZ2AjX4q4Wu7t4uZjOu71uyNmaWlUkJQ=
 github.com/aws/aws-sdk-go v1.55.8/go.mod h1:ZkViS9AqA6otK+JBBNH2++sx1sgxrPKcSzPPvQkUtXk=
 github.com/creack/pty v1.1.9/go.mod h1:oKZEueFk5CKHvIhNR5MUki03XCEU+Q6VDXinZuGJ33E=

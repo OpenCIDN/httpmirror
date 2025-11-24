@@ -32,6 +32,9 @@ var (
 	Kubeconfig            string
 	Master                string
 	InsecureSkipTLSVerify bool
+
+	CIDNMaximumRunning   int64 = 3
+	CIDNMinimumChunkSize int64 = 128 * 1024 * 1024
 )
 
 func init() {
@@ -49,6 +52,8 @@ func init() {
 	pflag.StringVar(&Master, "master", Master, "The address of the Kubernetes API server")
 	pflag.BoolVar(&InsecureSkipTLSVerify, "insecure-skip-tls-verify", false, "If true, the server's certificate will not be checked for validity. This will make your HTTPS connections insecure")
 
+	pflag.Int64Var(&CIDNMaximumRunning, "cidn-maximum-running", CIDNMaximumRunning, "Maximum number of running CIDN blob sync tasks")
+	pflag.Int64Var(&CIDNMinimumChunkSize, "cidn-minimum-chunk-size", CIDNMinimumChunkSize, "Minimum chunk size for CIDN blob sync tasks")
 	pflag.Parse()
 }
 
@@ -120,6 +125,8 @@ func main() {
 
 		ph.CIDNClient = clientset
 		ph.CIDNDestination = u.Scheme
+		ph.CIDNMaximumRunning = CIDNMaximumRunning
+		ph.CIDNMinimumChunkSize = CIDNMinimumChunkSize
 
 		sharedInformerFactory := externalversions.NewSharedInformerFactory(clientset, 0)
 		ph.CIDNBlobInformer = sharedInformerFactory.Task().V1alpha1().Blobs()

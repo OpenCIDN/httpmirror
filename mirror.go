@@ -9,6 +9,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 	"sync"
@@ -104,6 +105,12 @@ type MirrorHandler struct {
 	// CIDNDestination is the destination name for CIDN blobs.
 	// Typically set to the storage backend scheme (e.g., "s3").
 	CIDNDestination string
+
+	// CIDNMaximumRunning is the maximum number of running CIDN blob sync operations.
+	CIDNMaximumRunning int64
+
+	// CIDNMinimumChunkSize is the minimum chunk size for CIDN blob sync operations.
+	CIDNMinimumChunkSize int64
 }
 
 // Logger provides a simple logging interface for the mirror handler.
@@ -402,6 +409,21 @@ func getBlobName(urlPath string) string {
 	return hex.EncodeToString(m[:])
 }
 
+func formatGroup(s string) string {
+	u, err := url.Parse(s)
+	if err != nil {
+		return "unknown"
+	}
+
+	parts := strings.SplitN(u.Path, "/", 3)
+	if len(parts) > 1 && parts[1] != "" {
+		u.Path = "/" + parts[1]
+	} else {
+		u.Path = ""
+	}
+	return u.String()
+}
+
 func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cacheFile string) error {
 	blobs := m.CIDNClient.TaskV1alpha1().Blobs()
 	name := getBlobName(cacheFile)
@@ -422,12 +444,13 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 					v1alpha1.WebuiDisplayNameAnnotation: sourceFile,
 					v1alpha1.ReleaseTTLAnnotation:       "1h",
 					v1alpha1.WebuiTagAnnotation:         "file",
+					v1alpha1.WebuiGroupAnnotation:       formatGroup(sourceFile),
 				},
 			},
 			Spec: v1alpha1.BlobSpec{
-				MaximumRunning:   3,
+				MaximumRunning:   m.CIDNMaximumRunning,
 				MaximumPending:   1,
-				MinimumChunkSize: 128 * 1024 * 1024,
+				MinimumChunkSize: m.CIDNMinimumChunkSize,
 				MaximumRetry:     2,
 				Source: []v1alpha1.BlobSource{
 					{

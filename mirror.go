@@ -392,6 +392,14 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		return
 	case err := <-errCh:
 		if err != nil {
+			if cacheInfo != nil {
+				if m.Logger != nil {
+					m.Logger.Println("Recache error", file, err)
+				}
+				m.responseCache(w, r, file, cacheInfo)
+				return
+			}
+
 			if errors.Is(err, ErrNotOK) {
 				m.notFoundResponse(w, r)
 				return
@@ -399,7 +407,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			m.errorResponse(w, r, err)
 			return
 		}
-		m.responseCache(w, r, file, nil)
+		m.responseCache(w, r, file, cacheInfo)
 		return
 	}
 }

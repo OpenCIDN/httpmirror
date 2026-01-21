@@ -22,6 +22,7 @@ var (
 	address                 string
 	storageURL              string
 	linkExpires             time.Duration
+	host                    string
 	hostFromFirstPath       bool
 	checkSyncTimeout        time.Duration
 	ContinuationGetInterval time.Duration
@@ -41,6 +42,7 @@ func init() {
 	pflag.StringVar(&address, "address", ":8080", "listen on the address")
 	pflag.StringVar(&storageURL, "storage-url", "", "storage url")
 	pflag.DurationVar(&linkExpires, "link-expires", 24*time.Hour, "link expires")
+	pflag.StringVar(&host, "host", "", "host")
 	pflag.BoolVar(&hostFromFirstPath, "host-from-first-path", false, "host from first path")
 	pflag.DurationVar(&checkSyncTimeout, "check-sync-timeout", 0, "check sync timeout")
 	pflag.DurationVar(&ContinuationGetInterval, "continuation-get-interval", 0, "continuation get interval")
@@ -59,6 +61,11 @@ func init() {
 
 func main() {
 	logger := log.New(os.Stderr, "[http mirror] ", log.LstdFlags)
+
+	if host != "" && hostFromFirstPath {
+		logger.Println("host and host-from-first-path cannot be set at the same time")
+		os.Exit(1)
+	}
 
 	var client *sss.SSS
 
@@ -99,6 +106,7 @@ func main() {
 		RemoteCache:       client,
 		LinkExpires:       linkExpires,
 		CheckSyncTimeout:  checkSyncTimeout,
+		Host:              host,
 		HostFromFirstPath: hostFromFirstPath,
 		BlockSuffix:       BlockSuffix,
 		NoRedirect:        NoRedirect,

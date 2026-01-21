@@ -74,6 +74,9 @@ type MirrorHandler struct {
 	// Set to 0 to disable sync checking.
 	CheckSyncTimeout time.Duration
 
+	// Host is the target host for all requests.
+	Host string
+
 	// HostFromFirstPath enables extracting the target host from the first
 	// path segment instead of the Host header.
 	// When true, URLs like /example.com/path/file become requests to
@@ -156,6 +159,9 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if m.Host != "" {
+		r.Host = m.Host
+	}
 	host := r.Host
 	if m.HostFromFirstPath {
 		paths := strings.Split(urlpath[1:], "/")

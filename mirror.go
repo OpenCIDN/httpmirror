@@ -209,6 +209,7 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
+	m.setHuggingFaceHeaders(rw, r)
 	if m.NoRedirect {
 		m.serveFromCache(rw, r, file, info)
 	} else {
@@ -216,19 +217,7 @@ func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, f
 	}
 }
 
-func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
-	expires := m.LinkExpires
-	var url string
-	var err error
-
-	if sys := info.Sys(); sys != nil {
-		if resp, ok := sys.(sss.FileInfoExpansion); ok {
-			if etag := resp.ETag; etag != nil && *etag != "" {
-				rw.Header().Set("Etag", *etag)
-			}
-		}
-	}
-
+func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Request) {
 	// Special handling for huggingface.co to add X-Repo-Commit header with HF_ENDPOINT
 	if r.Host == "huggingface.co" {
 		sl := strings.SplitN(r.URL.Path, "/", 6)
@@ -238,6 +227,22 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 			rw.Header().Set("X-Repo-Commit", sl[4])
 		}
 	}
+}
+
+func (m *MirrorHandler) setHeaders(rw http.ResponseWriter, info sss.FileInfo) {
+	if sys := info.Sys(); sys != nil {
+		if resp, ok := sys.(sss.FileInfoExpansion); ok {
+			if etag := resp.ETag; etag != nil && *etag != "" {
+				rw.Header().Set("Etag", *etag)
+			}
+		}
+	}
+}
+
+func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
+	expires := m.LinkExpires
+	var url string
+	var err error
 
 	if r.Method == http.MethodHead {
 		if info == nil {
@@ -249,6 +254,7 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 			}
 		}
 		if info != nil {
+			m.setHeaders(rw, info)
 			rw.Header().Set("Content-Type", "application/octet-stream")
 			rw.Header().Set("Content-Length", fmt.Sprint(info.Size()))
 			rw.Header().Set("Last-Modified", info.ModTime().Format(http.TimeFormat))
@@ -281,6 +287,8 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 // It reads the file from RemoteCache and streams it to the client.
 func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
 	ctx := r.Context()
+	m.setHeaders(rw, info)
+
 	if r.Method == http.MethodHead {
 		// Get file info if not already provided
 		if info == nil {

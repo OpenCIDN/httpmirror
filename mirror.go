@@ -226,6 +226,9 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 			if etag := resp.ETag; etag != nil && *etag != "" {
 				rw.Header().Set("Etag", *etag)
 			}
+			if acceptRanges := resp.AcceptRanges; acceptRanges != nil && *acceptRanges != "" {
+				rw.Header().Set("Accept-Ranges", *acceptRanges)
+			}
 		}
 	}
 

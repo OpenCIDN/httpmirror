@@ -220,6 +220,25 @@ func (m *MirrorHandler) redirect(rw http.ResponseWriter, r *http.Request, file s
 	expires := m.LinkExpires
 	var url string
 	var err error
+
+	if sys := info.Sys(); sys != nil {
+		if resp, ok := sys.(sss.FileInfoExpansion); ok {
+			if etag := resp.ETag; etag != nil && *etag != "" {
+				rw.Header().Set("Etag", *etag)
+			}
+		}
+	}
+
+	// Special handling for huggingface.co to add X-Repo-Commit header with HF_ENDPOINT
+	if r.Host == "huggingface.co" {
+		sl := strings.SplitN(r.URL.Path, "/", 6)
+		if len(sl) == 6 &&
+			sl[3] == "resolve" &&
+			len(sl[4]) == 40 {
+			rw.Header().Set("X-Repo-Commit", sl[4])
+		}
+	}
+
 	if r.Method == http.MethodHead {
 		if info == nil {
 			info, err = m.RemoteCache.Stat(r.Context(), file)

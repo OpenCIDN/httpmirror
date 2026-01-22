@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/md5"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -209,7 +210,10 @@ func (m *MirrorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
-	m.setHuggingFaceHeaders(rw, r)
+	if err := m.setHuggingFaceHeaders(rw, r); err != nil {
+		m.errorResponse(rw, r, err)
+		return
+	}
 	if m.NoRedirect {
 		m.serveFromCache(rw, r, file, info)
 	} else {
@@ -217,16 +221,146 @@ func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, f
 	}
 }
 
-func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Request) {
+func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Request) error {
 	// Special handling for huggingface.co to add X-Repo-Commit header with HF_ENDPOINT
-	if r.Host == "huggingface.co" {
-		sl := strings.SplitN(r.URL.Path, "/", 6)
-		if len(sl) == 6 &&
-			sl[3] == "resolve" &&
-			len(sl[4]) == 40 {
-			rw.Header().Set("X-Repo-Commit", sl[4])
+	if m.RemoteCache == nil {
+		return nil
+	}
+
+	if r.Host != "huggingface.co" {
+		return nil
+	}
+
+	rIndex := strings.Index(r.URL.Path, "/resolve/")
+	if rIndex < 0 {
+		return nil
+	}
+
+	repoRef := r.URL.Path[rIndex+9:]
+	slashIndex := strings.Index(repoRef, "/")
+	if slashIndex >= 0 {
+		repoRef = repoRef[:slashIndex]
+	}
+
+	if len(repoRef) == 40 {
+		rw.Header().Set("X-Repo-Commit", repoRef)
+		return nil
+	}
+
+	repoName := r.URL.Path[1:rIndex]
+	repoType := "models"
+	if strings.HasPrefix(repoName, "datasets/") {
+		repoType = "datasets"
+		repoName = strings.TrimPrefix(repoName, "datasets/")
+	} else if strings.HasPrefix(repoName, "spaces/") {
+		repoType = "spaces"
+		repoName = strings.TrimPrefix(repoName, "spaces/")
+	}
+
+	file := fmt.Sprintf("huggingface.co/api/%s/%s/revision/%s", repoType, repoName, repoRef)
+	if m.Logger != nil {
+		m.Logger.Println("HF Repo Info", file)
+	}
+
+	ctx := r.Context()
+	doneCache, err := m.uniqueLock(ctx, file)
+	if err != nil {
+		return err
+	}
+
+	setFromCache := func() {
+		fr, err := m.RemoteCache.Reader(ctx, file)
+		if err != nil {
+			if m.Logger != nil {
+				m.Logger.Println("HF Repo Reader error", file, err)
+			}
+			return
+		}
+		defer fr.Close()
+
+		var sha struct {
+			Sha string `json:"sha"`
+		}
+
+		_ = json.NewDecoder(fr).Decode(&sha)
+		if sha.Sha != "" {
+			rw.Header().Set("X-Repo-Commit", sha.Sha)
 		}
 	}
+
+	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
+	if err != nil {
+		if errors.Is(err, context.Canceled) {
+			doneCache()
+			return err
+		}
+		if m.Logger != nil {
+			m.Logger.Println("HF Cache Miss", file, err)
+		}
+	} else {
+		if m.Logger != nil {
+			m.Logger.Println("HF Cache Hit", file)
+		}
+
+		if m.CIDNClient == nil {
+			sourceCtx, sourceCancel := context.WithTimeout(ctx, m.CheckSyncTimeout)
+			sourceInfo, err := httpHead(sourceCtx, m.client(), r.URL.String())
+			if err != nil {
+				sourceCancel()
+				if m.Logger != nil {
+					m.Logger.Println("HF Source Miss", file, err)
+				}
+				setFromCache()
+				doneCache()
+				return nil
+			}
+			sourceCancel()
+
+			sourceSize := sourceInfo.Size()
+			cacheSize := cacheInfo.Size()
+			if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
+				setFromCache()
+				doneCache()
+				return nil
+			}
+
+			if m.Logger != nil {
+				m.Logger.Println("HF Source change", file, sourceSize, cacheSize)
+			}
+		}
+
+	}
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		defer doneCache()
+		url := "https://" + file
+		errCh <- m.cacheFile(context.Background(), url, file)
+	}()
+
+	select {
+	case <-ctx.Done():
+		return err
+	case err := <-errCh:
+		if err != nil {
+			if cacheInfo != nil {
+				if m.Logger != nil {
+					m.Logger.Println("HF Recache error", file, err)
+				}
+				setFromCache()
+				return nil
+			}
+
+			if errors.Is(err, ErrNotOK) {
+				return nil
+			}
+			return err
+		}
+		setFromCache()
+	}
+
+	return nil
 }
 
 func (m *MirrorHandler) setHeaders(rw http.ResponseWriter, info sss.FileInfo) {
@@ -335,26 +469,33 @@ func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, 
 	}
 }
 
-func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	file := path.Join(r.Host, r.URL.EscapedPath())
-
+func (m *MirrorHandler) uniqueLock(ctx context.Context, file string) (func(), error) {
 	closeValue, loaded := m.mut.LoadOrStore(file, make(chan struct{}))
 	closeCh := closeValue.(chan struct{})
 	for loaded {
 		select {
 		case <-ctx.Done():
-			m.errorResponse(w, r, ctx.Err())
-			return
+			return nil, ctx.Err()
 		case <-closeCh:
 		}
 		closeValue, loaded = m.mut.LoadOrStore(file, make(chan struct{}))
 		closeCh = closeValue.(chan struct{})
 	}
 
-	doneCache := func() {
+	return func() {
 		m.mut.Delete(file)
 		close(closeCh)
+	}, nil
+}
+
+func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	file := path.Join(r.Host, r.URL.EscapedPath())
+
+	doneCache, err := m.uniqueLock(ctx, file)
+	if err != nil {
+		m.errorResponse(w, r, err)
+		return
 	}
 
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
@@ -410,13 +551,7 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		defer doneCache()
-		var err error
-		if m.CIDNClient != nil {
-			err = m.cacheFileWithCIDN(context.Background(), r.URL.String(), file)
-		} else {
-			err = m.cacheFile(context.Background(), r.URL.String(), file)
-		}
-		errCh <- err
+		errCh <- m.cacheFile(context.Background(), r.URL.String(), file)
 	}()
 
 	select {
@@ -463,6 +598,13 @@ func formatGroup(s string) string {
 		u.Path = ""
 	}
 	return u.String()
+}
+
+func (m *MirrorHandler) cacheFile(ctx context.Context, sourceFile, cacheFile string) error {
+	if m.CIDNClient != nil {
+		return m.cacheFileWithCIDN(context.Background(), sourceFile, cacheFile)
+	}
+	return m.cacheFileDirect(context.Background(), sourceFile, cacheFile)
 }
 
 func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cacheFile string) error {
@@ -601,7 +743,7 @@ func (m *MirrorHandler) cacheFileWithCIDN(ctx context.Context, sourceFile, cache
 	}
 }
 
-func (m *MirrorHandler) cacheFile(ctx context.Context, sourceFile, cacheFile string) error {
+func (m *MirrorHandler) cacheFileDirect(ctx context.Context, sourceFile, cacheFile string) error {
 	resp, info, err := httpGet(ctx, m.client(), sourceFile)
 	if err != nil {
 		return err

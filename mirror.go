@@ -13,13 +13,13 @@ import (
 	"net/url"
 	"path"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/OpenCIDN/cidn/pkg/apis/task/v1alpha1"
 	"github.com/OpenCIDN/cidn/pkg/clientset/versioned"
 	informers "github.com/OpenCIDN/cidn/pkg/informers/externalversions/task/v1alpha1"
 	"github.com/wzshiming/sss"
+	"golang.org/x/sync/singleflight"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/tools/cache"
@@ -96,7 +96,7 @@ type MirrorHandler struct {
 	// you want the proxy to serve all traffic directly.
 	NoRedirect bool
 
-	mut sync.Map
+	group singleflight.Group
 
 	// CIDNClient is the Kubernetes client for CIDN integration.
 	// When set along with RemoteCache, enables distributed blob management.
@@ -263,10 +263,6 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 	}
 
 	ctx := r.Context()
-	doneCache, err := m.uniqueLock(ctx, file)
-	if err != nil {
-		return err
-	}
 
 	setFromCache := func() {
 		fr, err := m.RemoteCache.Reader(ctx, file)
@@ -291,7 +287,6 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
-			doneCache()
 			return err
 		}
 		if m.Logger != nil {
@@ -311,7 +306,6 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 					m.Logger.Println("HF Source Miss", file, err)
 				}
 				setFromCache()
-				doneCache()
 				return nil
 			}
 			sourceCancel()
@@ -320,7 +314,6 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 			cacheSize := cacheInfo.Size()
 			if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
 				setFromCache()
-				doneCache()
 				return nil
 			}
 
@@ -331,31 +324,28 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 
 	}
 
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer doneCache()
+	ch := m.group.DoChan(file, func() (interface{}, error) {
 		url := "https://" + file
-		errCh <- m.cacheFile(context.Background(), url, file)
-	}()
+		return nil, m.cacheFile(context.Background(), url, file)
+	})
 
 	select {
 	case <-ctx.Done():
-		return err
-	case err := <-errCh:
-		if err != nil {
+		return ctx.Err()
+	case result := <-ch:
+		if result.Err != nil {
 			if cacheInfo != nil {
 				if m.Logger != nil {
-					m.Logger.Println("HF Recache error", file, err)
+					m.Logger.Println("HF Recache error", file, result.Err)
 				}
 				setFromCache()
 				return nil
 			}
 
-			if errors.Is(err, ErrNotOK) {
+			if errors.Is(result.Err, ErrNotOK) {
 				return nil
 			}
-			return err
+			return result.Err
 		}
 		setFromCache()
 	}
@@ -469,40 +459,14 @@ func (m *MirrorHandler) serveFromCache(rw http.ResponseWriter, r *http.Request, 
 	}
 }
 
-func (m *MirrorHandler) uniqueLock(ctx context.Context, file string) (func(), error) {
-	closeValue, loaded := m.mut.LoadOrStore(file, make(chan struct{}))
-	closeCh := closeValue.(chan struct{})
-	for loaded {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-closeCh:
-		}
-		closeValue, loaded = m.mut.LoadOrStore(file, make(chan struct{}))
-		closeCh = closeValue.(chan struct{})
-	}
-
-	return func() {
-		m.mut.Delete(file)
-		close(closeCh)
-	}, nil
-}
-
 func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	file := path.Join(r.Host, r.URL.EscapedPath())
-
-	doneCache, err := m.uniqueLock(ctx, file)
-	if err != nil {
-		m.errorResponse(w, r, err)
-		return
-	}
 
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
 			m.errorResponse(w, r, ctx.Err())
-			doneCache()
 			return
 		}
 		if m.Logger != nil {
@@ -515,7 +479,6 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 
 		if m.CheckSyncTimeout == 0 {
 			m.responseCache(w, r, file, cacheInfo)
-			doneCache()
 			return
 		}
 
@@ -528,7 +491,6 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 					m.Logger.Println("Source Miss", file, err)
 				}
 				m.responseCache(w, r, file, cacheInfo)
-				doneCache()
 				return
 			}
 			sourceCancel()
@@ -537,7 +499,6 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			cacheSize := cacheInfo.Size()
 			if cacheSize != 0 && (sourceSize <= 0 || sourceSize == cacheSize) {
 				m.responseCache(w, r, file, cacheInfo)
-				doneCache()
 				return
 			}
 
@@ -547,32 +508,29 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	errCh := make(chan error, 1)
-
-	go func() {
-		defer doneCache()
-		errCh <- m.cacheFile(context.Background(), r.URL.String(), file)
-	}()
+	ch := m.group.DoChan(file, func() (interface{}, error) {
+		return nil, m.cacheFile(context.Background(), r.URL.String(), file)
+	})
 
 	select {
 	case <-ctx.Done():
 		m.errorResponse(w, r, ctx.Err())
 		return
-	case err := <-errCh:
-		if err != nil {
+	case result := <-ch:
+		if result.Err != nil {
 			if cacheInfo != nil {
 				if m.Logger != nil {
-					m.Logger.Println("Recache error", file, err)
+					m.Logger.Println("Recache error", file, result.Err)
 				}
 				m.responseCache(w, r, file, cacheInfo)
 				return
 			}
 
-			if errors.Is(err, ErrNotOK) {
+			if errors.Is(result.Err, ErrNotOK) {
 				m.notFoundResponse(w, r)
 				return
 			}
-			m.errorResponse(w, r, err)
+			m.errorResponse(w, r, result.Err)
 			return
 		}
 		m.responseCache(w, r, file, cacheInfo)

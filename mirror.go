@@ -331,7 +331,7 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 
 	select {
 	case <-ctx.Done():
-		return err
+		return ctx.Err()
 	case result := <-ch:
 		if result.Err != nil {
 			if cacheInfo != nil {

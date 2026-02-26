@@ -6,6 +6,7 @@ require (
 	github.com/OpenCIDN/cidn v0.0.108
 	github.com/spf13/pflag v1.0.10
 	github.com/wzshiming/httpseek v0.5.0
+	github.com/wzshiming/ioswmr v0.0.0-20260228060639-c732d91a1feb
 	github.com/wzshiming/sss v0.7.0
 	golang.org/x/sync v0.19.0
 	k8s.io/apimachinery v0.34.1

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/OpenCIDN/cidn/pkg/clientset/versioned"
@@ -87,6 +88,14 @@ type MirrorHandler struct {
 	NoRedirect bool
 
 	group singleflight.Group
+
+	// TeeResponse is used to tee the response body for caching while serving.
+	// When true, the handler will write the response to a tee while
+	// caching it in RemoteCache. This allows for streaming responses to clients
+	// while simultaneously caching them.
+	TeeResponse bool
+
+	teeCache sync.Map
 
 	// CIDNClient is the Kubernetes client for CIDN integration.
 	// When set along with RemoteCache, enables distributed blob management.

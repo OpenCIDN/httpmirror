@@ -52,7 +52,7 @@ func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Re
 		repoName = strings.TrimPrefix(repoName, "spaces/")
 	}
 
-	file := fmt.Sprintf("huggingface.co/api/%s/%s/revision/%s", repoType, repoName, repoRef)
+	file := fmt.Sprintf(r.Host+"/api/%s/%s/revision/%s", repoType, repoName, repoRef)
 	if m.Logger != nil {
 		m.Logger.Println("HF Repo Info", file)
 	}

@@ -206,11 +206,16 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 				}
 				if !result.Shared {
 					m.teeCache.Store(file, tee)
+					if m.Logger != nil {
+						m.Logger.Println("Tee Cache Miss", file)
+					}
+				} else {
+					if m.Logger != nil {
+						m.Logger.Println("Tee Cache Hit after wait", file)
+					}
 				}
 			}
-			if m.Logger != nil {
-				m.Logger.Println("Tee Cache Miss", file)
-			}
+
 		} else {
 			tee, ok = val.(*teeResponse)
 			if !ok {

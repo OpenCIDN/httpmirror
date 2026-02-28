@@ -183,7 +183,8 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		val, ok := m.teeCache.Load(file)
 		if !ok {
 			ch := m.group.DoChan(file, func() (any, error) {
-				return m.cacheFileTee(context.Background(), r.URL.String(), file)
+				url := "https://" + file
+				return m.cacheFileTee(context.Background(), url, file)
 			})
 			select {
 			case <-ctx.Done():
@@ -223,7 +224,8 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ch := m.group.DoChan(file, func() (any, error) {
-		return nil, m.cacheFile(context.Background(), r.URL.String(), file)
+		url := "https://" + file
+		return nil, m.cacheFile(context.Background(), url, file)
 	})
 
 	select {

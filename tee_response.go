@@ -19,6 +19,7 @@ type teeResponse struct {
 	swmr      ioswmr.SWMR
 	tmp       *os.File
 	teeCache  *sync.Map
+	etag      string
 	cacheFile string
 }
 
@@ -30,10 +31,12 @@ func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rs := t.swmr.NewReadSeeker(0, int(size))
 		defer rs.Close()
 		name := path.Base(r.URL.Path)
+		w.Header().Set("ETag", t.etag)
 		http.ServeContent(w, r, name, t.fileInfo.ModTime(), rs)
 	} else {
 		rs := t.swmr.NewReader(0)
 		defer rs.Close()
+		w.Header().Set("ETag", t.etag)
 		w.Header().Set("Content-Type", "application/octet-stream")
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {
@@ -98,6 +101,7 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 		fileInfo:  info,
 		swmr:      swmr,
 		tmp:       tmp,
+		etag:      info.ETag(),
 		teeCache:  &m.teeCache,
 		cacheFile: cacheFile,
 	}

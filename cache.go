@@ -208,6 +208,9 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 					m.teeCache.Store(file, tee)
 				}
 			}
+			if m.Logger != nil {
+				m.Logger.Println("Tee Cache Miss", file)
+			}
 		} else {
 			tee, ok = val.(*teeResponse)
 			if !ok {
@@ -215,6 +218,9 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 					m.Logger.Println("Tee Cache type assertion error", file)
 				}
 				return
+			}
+			if m.Logger != nil {
+				m.Logger.Println("Tee Cache Hit", file)
 			}
 		}
 

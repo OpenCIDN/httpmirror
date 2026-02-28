@@ -40,7 +40,7 @@ func httpHead(ctx context.Context, client *http.Client, p string) (fs.FileInfo, 
 //
 // The caller is responsible for closing the returned io.ReadCloser.
 // Returns ErrNotOK if the response status is not 200 OK.
-func httpGet(ctx context.Context, client *http.Client, p string) (io.ReadCloser, fs.FileInfo, error) {
+func httpGet(ctx context.Context, client *http.Client, p string) (io.ReadCloser, *fileInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p, nil)
 	if err != nil {
 		return nil, nil, err
@@ -97,6 +97,11 @@ func (f fileInfo) Sys() any {
 // Size returns the content length from the HTTP response.
 func (f fileInfo) Size() int64 {
 	return f.resp.ContentLength
+}
+
+// ETag returns the ETag header from the HTTP response, which can be used for caching and validation.
+func (f fileInfo) ETag() string {
+	return f.resp.Header.Get("ETag")
 }
 
 // ModTime returns the modification time from the Last-Modified header.

@@ -84,13 +84,15 @@ func main() {
 
 	var transport http.RoundTripper = http.DefaultTransport
 
-	if ContinuationGetInterval > 0 {
+	if ContinuationGetRetry > 0 {
 		transport = httpseek.NewMustReaderTransport(transport, func(r *http.Request, retry int, err error) error {
 			if ContinuationGetRetry > 0 && retry >= ContinuationGetRetry {
 				return err
 			}
 			logger.Println("Retry cache", r.URL, retry, err)
-			time.Sleep(ContinuationGetInterval)
+			if ContinuationGetInterval > 0 {
+				time.Sleep(ContinuationGetInterval)
+			}
 			return nil
 		})
 	}

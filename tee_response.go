@@ -9,17 +9,19 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"path/filepath"
 	"sync"
 
 	"github.com/wzshiming/ioswmr"
 )
 
 type teeResponse struct {
-	fileInfo  fs.FileInfo
-	swmr      ioswmr.SWMR
-	tmp       *os.File
-	teeCache  *sync.Map
-	cacheFile string
+	fileInfo       fs.FileInfo
+	swmr           ioswmr.SWMR
+	tmp            *os.File
+	teeCache       *sync.Map
+	cacheFile      string
+	localCachePath string // when set, rename tmp to this path on completion and keep the file
 }
 
 func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -54,7 +56,9 @@ func (t *teeResponse) Close() error {
 	if err != nil {
 		return err
 	}
-	_ = os.Remove(t.tmp.Name())
+	if t.localCachePath == "" {
+		_ = os.Remove(t.tmp.Name())
+	}
 	return nil
 }
 
@@ -76,11 +80,24 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 		m.Logger.Println("Tee Cache", cacheFile, contentLength)
 	}
 
-	tmp, err := os.CreateTemp("", "mirror-tee-*")
+	var tmp *os.File
+	var localCachePath string
+
+	if m.LocalCacheDir != "" {
+		localCachePath = filepath.Join(m.LocalCacheDir, cacheFile)
+		if err := os.MkdirAll(filepath.Dir(localCachePath), 0o750); err != nil {
+			_ = resp.Close()
+			return nil, err
+		}
+		tmp, err = os.Create(localCachePath + ".tmp")
+	} else {
+		tmp, err = os.CreateTemp("", "mirror-tee-*")
+	}
 	if err != nil {
 		_ = resp.Close()
 		return nil, err
 	}
+
 	fw, err := m.RemoteCache.Writer(ctx, cacheFile)
 	if err != nil {
 		if m.Logger != nil {
@@ -95,11 +112,12 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 	swmr := ioswmr.NewSWMR(tmp)
 
 	tee := &teeResponse{
-		fileInfo:  info,
-		swmr:      swmr,
-		tmp:       tmp,
-		teeCache:  &m.teeCache,
-		cacheFile: cacheFile,
+		fileInfo:       info,
+		swmr:           swmr,
+		tmp:            tmp,
+		teeCache:       &m.teeCache,
+		cacheFile:      cacheFile,
+		localCachePath: localCachePath,
 	}
 
 	go func() {
@@ -115,6 +133,9 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 				m.Logger.Println("SWMR copy error", cacheFile, contentLength, n, err)
 			}
 			_ = fw.Cancel(context.Background())
+			if localCachePath != "" {
+				_ = os.Remove(tmp.Name())
+			}
 			return
 		}
 
@@ -124,6 +145,9 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 				m.Logger.Println("Cache copy error", cacheFile, err)
 			}
 			_ = fw.Cancel(context.Background())
+			if localCachePath != "" {
+				_ = os.Remove(tmp.Name())
+			}
 			return
 		}
 
@@ -132,8 +156,20 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 			if m.Logger != nil {
 				m.Logger.Println("Cache Commit error", cacheFile, err)
 			}
+			if localCachePath != "" {
+				_ = os.Remove(tmp.Name())
+			}
 			return
 		}
+
+		if localCachePath != "" {
+			if err := os.Rename(tmp.Name(), localCachePath); err != nil {
+				if m.Logger != nil {
+					m.Logger.Println("Local cache rename error", cacheFile, err)
+				}
+			}
+		}
+
 		if m.Logger != nil {
 			m.Logger.Println("Tee Cached", cacheFile, contentLength, n)
 		}

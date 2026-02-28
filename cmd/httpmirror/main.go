@@ -37,7 +37,8 @@ var (
 	CIDNMaximumRunning   int64 = 3
 	CIDNMinimumChunkSize int64 = 128 * 1024 * 1024
 
-	TeeResponse bool
+	TeeResponse   bool
+	LocalCacheDir string
 )
 
 func init() {
@@ -60,6 +61,7 @@ func init() {
 	pflag.Int64Var(&CIDNMinimumChunkSize, "cidn-minimum-chunk-size", CIDNMinimumChunkSize, "Minimum chunk size for CIDN blob sync tasks")
 
 	pflag.BoolVar(&TeeResponse, "tee-response", false, "Tee the response body for caching while serving")
+	pflag.StringVar(&LocalCacheDir, "local-cache-dir", "", "Directory path for local file caching with tee response")
 	pflag.Parse()
 }
 
@@ -115,6 +117,7 @@ func main() {
 		BlockSuffix:       BlockSuffix,
 		NoRedirect:        NoRedirect,
 		TeeResponse:       TeeResponse,
+		LocalCacheDir:     LocalCacheDir,
 	}
 
 	if (Kubeconfig != "" || Master != "") && storageURL != "" {

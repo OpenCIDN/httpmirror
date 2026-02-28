@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
+	"path/filepath"
 
 	"github.com/wzshiming/sss"
 )
@@ -133,6 +135,15 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		m.errorResponse(w, r, err)
 		return
 	}
+
+	// Check local cache first (fast path for tee mode with local caching)
+	if m.TeeResponse && m.LocalCacheDir != "" {
+		localPath := filepath.Join(m.LocalCacheDir, file)
+		if m.tryServeFromLocalCache(w, r, localPath, file) {
+			return
+		}
+	}
+
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -315,4 +326,53 @@ func (m *MirrorHandler) cacheFileDirect(ctx context.Context, sourceFile, cacheFi
 	}
 
 	return nil
+}
+
+// tryServeFromLocalCache attempts to serve a file from the local cache directory.
+// It checks if the file exists, optionally validates freshness against the source,
+// and serves the file using http.ServeContent.
+// Returns true if the file was served from local cache, false otherwise.
+func (m *MirrorHandler) tryServeFromLocalCache(w http.ResponseWriter, r *http.Request, localPath, file string) bool {
+	fi, err := os.Stat(localPath)
+	if err != nil || fi.IsDir() || fi.Size() == 0 {
+		return false
+	}
+
+	if m.CheckSyncTimeout > 0 && m.CIDNClient == nil {
+		ctx := r.Context()
+		sourceCtx, sourceCancel := context.WithTimeout(ctx, m.CheckSyncTimeout)
+		sourceInfo, err := httpHead(sourceCtx, m.client(), r.URL.String())
+		sourceCancel()
+		if err == nil {
+			sourceSize := sourceInfo.Size()
+			localSize := fi.Size()
+			if sourceSize > 0 && sourceSize != localSize {
+				if m.Logger != nil {
+					m.Logger.Println("Source change (local cache)", file, sourceSize, localSize)
+				}
+				return false
+			}
+		} else {
+			if m.Logger != nil {
+				m.Logger.Println("Source check failed (local cache), serving stale", file, err)
+			}
+		}
+	}
+
+	f, err := os.Open(localPath)
+	if err != nil {
+		if m.Logger != nil {
+			m.Logger.Println("Local cache open error", file, err)
+		}
+		return false
+	}
+	defer f.Close()
+
+	if m.Logger != nil {
+		m.Logger.Println("Local Cache Hit", file)
+	}
+
+	name := path.Base(r.URL.Path)
+	http.ServeContent(w, r, name, fi.ModTime(), f)
+	return true
 }

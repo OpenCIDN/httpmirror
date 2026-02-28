@@ -95,6 +95,13 @@ type MirrorHandler struct {
 	// while simultaneously caching them.
 	TeeResponse bool
 
+	// LocalCacheDir is the directory path for local file caching.
+	// When set together with TeeResponse, files are persisted locally on disk
+	// in addition to being uploaded to RemoteCache. On subsequent requests,
+	// files are served directly from the local cache for faster responses.
+	// Leave empty to disable local caching (tee will use temporary files).
+	LocalCacheDir string
+
 	teeCache sync.Map
 
 	// CIDNClient is the Kubernetes client for CIDN integration.

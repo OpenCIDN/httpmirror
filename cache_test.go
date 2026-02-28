@@ -5,7 +5,10 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+
+	"github.com/wzshiming/ioswmr"
 )
 
 func Test_tryServeFromLocalCache(t *testing.T) {
@@ -107,12 +110,26 @@ func Test_teeResponse_Close_localCache(t *testing.T) {
 			t.Fatal(err)
 		}
 		tmpPath := tmpFile.Name()
-		tmpFile.Close()
 
-		// Without localCachePath, the file should be removed by Close
-		_ = os.Remove(tmpPath)
+		var teeCache sync.Map
+		swmr := ioswmr.NewSWMR(tmpFile)
+		swmr.Close()
+
+		tee := &teeResponse{
+			tmp:            tmpFile,
+			swmr:           swmr,
+			teeCache:       &teeCache,
+			cacheFile:      "test/file",
+			localCachePath: "",
+		}
+
+		err = tee.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+
 		if _, err := os.Stat(tmpPath); !os.IsNotExist(err) {
-			t.Error("expected tmp file to be removed")
+			t.Error("expected tmp file to be removed when localCachePath is empty")
 		}
 	})
 
@@ -124,13 +141,29 @@ func Test_teeResponse_Close_localCache(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		// Verify the file still exists when localCachePath is set
+		tmpFile, err := os.Open(localPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var teeCache sync.Map
+		swmr := ioswmr.NewSWMR(tmpFile)
+		swmr.Close()
+
 		tee := &teeResponse{
+			tmp:            tmpFile,
+			swmr:           swmr,
+			teeCache:       &teeCache,
+			cacheFile:      "test/file",
 			localCachePath: localPath,
 		}
-		_ = tee
 
-		// File should still exist
+		err = tee.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		// File should still exist when localCachePath is set
 		if _, err := os.Stat(localPath); err != nil {
 			t.Errorf("expected local cache file to still exist: %v", err)
 		}

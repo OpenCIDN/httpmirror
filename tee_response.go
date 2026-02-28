@@ -32,6 +32,8 @@ func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		defer rs.Close()
 		name := path.Base(r.URL.Path)
 		w.Header().Set("ETag", t.etag)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Length", fmt.Sprint(size))
 		http.ServeContent(w, r, name, t.fileInfo.ModTime(), rs)
 	} else {
 		rs := t.swmr.NewReader(0)

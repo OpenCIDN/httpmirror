@@ -9,13 +9,20 @@ import (
 	"strings"
 )
 
+var (
+	hfHosts = map[string]struct{}{
+		"huggingface.co": {},
+		"hf-mirror.com":  {},
+	}
+)
+
 func (m *MirrorHandler) setHuggingFaceHeaders(rw http.ResponseWriter, r *http.Request) error {
 	// Special handling for huggingface.co to add X-Repo-Commit header with HF_ENDPOINT
 	if m.RemoteCache == nil {
 		return nil
 	}
 
-	if r.Host != "huggingface.co" {
+	if _, ok := hfHosts[r.Host]; !ok {
 		return nil
 	}
 

@@ -12,10 +12,6 @@ import (
 )
 
 func (m *MirrorHandler) responseCache(rw http.ResponseWriter, r *http.Request, file string, info sss.FileInfo) {
-	if err := m.setHuggingFaceHeaders(rw, r); err != nil {
-		m.errorResponse(rw, r, err)
-		return
-	}
 	if m.NoRedirect {
 		m.serveFromCache(rw, r, file, info)
 	} else {
@@ -133,6 +129,10 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	file := path.Join(r.Host, r.URL.EscapedPath())
 
+	if err := m.setHuggingFaceHeaders(w, r); err != nil {
+		m.errorResponse(w, r, err)
+		return
+	}
 	cacheInfo, err := m.RemoteCache.Stat(ctx, file)
 	if err != nil {
 		if errors.Is(err, context.Canceled) {
@@ -178,7 +178,51 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ch := m.group.DoChan(file, func() (interface{}, error) {
+	if m.TeeResponse {
+		var tee *teeResponse
+		val, ok := m.teeCache.Load(file)
+		if !ok {
+			ch := m.group.DoChan(file, func() (any, error) {
+				return m.cacheFileTee(context.Background(), r.URL.String(), file)
+			})
+			select {
+			case <-ctx.Done():
+				m.errorResponse(w, r, ctx.Err())
+				return
+			case result := <-ch:
+				if result.Err != nil {
+					if m.Logger != nil {
+						m.Logger.Println("Tee Cache error", file, result.Err)
+					}
+					return
+				}
+				tee, ok = result.Val.(*teeResponse)
+				if !ok {
+					if m.Logger != nil {
+						m.Logger.Println("Tee Cache type assertion error", file)
+					}
+					return
+				}
+				if !result.Shared {
+					m.teeCache.Store(file, tee)
+				}
+			}
+		} else {
+			tee, ok = val.(*teeResponse)
+			if !ok {
+				if m.Logger != nil {
+					m.Logger.Println("Tee Cache type assertion error", file)
+				}
+				return
+			}
+		}
+
+		defer tee.Close()
+		tee.ServeHTTP(w, r)
+		return
+	}
+
+	ch := m.group.DoChan(file, func() (any, error) {
 		return nil, m.cacheFile(context.Background(), r.URL.String(), file)
 	})
 

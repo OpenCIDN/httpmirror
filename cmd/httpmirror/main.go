@@ -36,6 +36,8 @@ var (
 
 	CIDNMaximumRunning   int64 = 3
 	CIDNMinimumChunkSize int64 = 128 * 1024 * 1024
+
+	TeeResponse bool
 )
 
 func init() {
@@ -56,6 +58,8 @@ func init() {
 
 	pflag.Int64Var(&CIDNMaximumRunning, "cidn-maximum-running", CIDNMaximumRunning, "Maximum number of running CIDN blob sync tasks")
 	pflag.Int64Var(&CIDNMinimumChunkSize, "cidn-minimum-chunk-size", CIDNMinimumChunkSize, "Minimum chunk size for CIDN blob sync tasks")
+
+	pflag.BoolVar(&TeeResponse, "tee-response", false, "Tee the response body for caching while serving")
 	pflag.Parse()
 }
 
@@ -110,6 +114,7 @@ func main() {
 		HostFromFirstPath: hostFromFirstPath,
 		BlockSuffix:       BlockSuffix,
 		NoRedirect:        NoRedirect,
+		TeeResponse:       TeeResponse,
 	}
 
 	if (Kubeconfig != "" || Master != "") && storageURL != "" {

@@ -195,6 +195,11 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 					if m.Logger != nil {
 						m.Logger.Println("Tee Cache error", file, result.Err)
 					}
+					if errors.Is(result.Err, ErrNotOK) {
+						m.notFoundResponse(w, r)
+						return
+					}
+					m.errorResponse(w, r, result.Err)
 					return
 				}
 				tee, ok = result.Val.(*teeResponse)

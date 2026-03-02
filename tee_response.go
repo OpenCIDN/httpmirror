@@ -7,20 +7,15 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
-	"os"
 	"path"
-	"sync"
 
 	"github.com/wzshiming/ioswmr"
 )
 
 type teeResponse struct {
-	fileInfo  fs.FileInfo
-	swmr      ioswmr.SWMR
-	tmp       *os.File
-	teeCache  *sync.Map
-	etag      string
-	cacheFile string
+	fileInfo fs.FileInfo
+	swmr     ioswmr.SWMR
+	etag     string
 }
 
 func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -31,15 +26,17 @@ func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		rs := t.swmr.NewReadSeeker(0, int(size))
 		defer rs.Close()
 		name := path.Base(r.URL.Path)
-		w.Header().Set("ETag", t.etag)
+		if t.etag != "" {
+			w.Header().Set("ETag", t.etag)
+		}
 		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Length", fmt.Sprint(size))
 		http.ServeContent(w, r, name, t.fileInfo.ModTime(), rs)
 	} else {
 		rs := t.swmr.NewReader(0)
 		defer rs.Close()
-		w.Header().Set("ETag", t.etag)
-		w.Header().Set("Content-Type", "application/octet-stream")
+		if t.etag != "" {
+			w.Header().Set("ETag", t.etag)
+		}
 		w.WriteHeader(http.StatusOK)
 		if r.Method == http.MethodGet {
 			_, _ = io.Copy(w, rs)
@@ -47,33 +44,15 @@ func (t *teeResponse) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (t *teeResponse) Close() error {
-	if !t.swmr.IsClosed() {
-		return nil
-	}
-	if t.swmr.Using() != 0 {
-		return nil
-	}
-	t.teeCache.Delete(t.cacheFile)
-	err := t.tmp.Close()
-	if err != nil {
-		return err
-	}
-	_ = os.Remove(t.tmp.Name())
-	return nil
-}
-
 func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile string) (*teeResponse, error) {
-	resp, info, err := httpGet(ctx, m.client(), sourceFile)
+	body, info, err := httpGet(ctx, m.client(), sourceFile, true)
 	if err != nil {
 		return nil, err
 	}
 
-	var body io.Reader = resp
-
 	contentLength := info.Size()
 	if contentLength == 0 {
-		_ = resp.Close()
+		_ = body.Close()
 		return nil, ErrNotOK
 	}
 
@@ -81,41 +60,45 @@ func (m *MirrorHandler) cacheFileTee(ctx context.Context, sourceFile, cacheFile 
 		m.Logger.Println("Tee Cache", cacheFile, contentLength)
 	}
 
-	tmp, err := os.CreateTemp("", "mirror-tee-*")
-	if err != nil {
-		_ = resp.Close()
-		return nil, err
-	}
 	fw, err := m.RemoteCache.Writer(ctx, cacheFile)
 	if err != nil {
 		if m.Logger != nil {
 			m.Logger.Println("Cache writer error", cacheFile, contentLength, err)
 		}
-		_ = resp.Close()
-		_ = tmp.Close()
-		_ = os.Remove(tmp.Name())
+		_ = body.Close()
 		return nil, err
 	}
 
-	swmr := ioswmr.NewSWMR(tmp)
+	swmr := ioswmr.NewSWMR(
+		ioswmr.NewMemoryOrTemporaryFileBuffer(nil, nil),
+		ioswmr.WithAutoClose(),
+		ioswmr.WithBeforeCloseFunc(func() {
+			m.teeCache.Delete(cacheFile)
+			if m.Logger != nil {
+				m.Logger.Println("Tee Cache closed", cacheFile, err)
+			}
+		}),
+	)
 
 	tee := &teeResponse{
-		fileInfo:  info,
-		swmr:      swmr,
-		tmp:       tmp,
-		etag:      info.ETag(),
-		teeCache:  &m.teeCache,
-		cacheFile: cacheFile,
+		fileInfo: info,
+		swmr:     swmr,
+		etag:     info.ETag(),
 	}
+	sw := swmr.Writer()
 
 	go func() {
-		defer tee.Close()
-		defer resp.Close()
-		defer fw.Close()
-		defer swmr.Close()
+		defer body.Close()
+		_, err := io.Copy(sw, body)
+		_ = sw.CloseWithError(err)
+	}()
 
-		w := io.MultiWriter(swmr, fw)
-		n, err := io.Copy(w, body)
+	go func() {
+		r := swmr.NewReader(0)
+		defer r.Close()
+
+		defer fw.Close()
+		n, err := io.Copy(fw, r)
 		if err != nil && !errors.Is(err, io.EOF) {
 			if m.Logger != nil {
 				m.Logger.Println("SWMR copy error", cacheFile, contentLength, n, err)

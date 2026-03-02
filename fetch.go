@@ -40,7 +40,7 @@ func httpHead(ctx context.Context, client *http.Client, p string) (fs.FileInfo, 
 //
 // The caller is responsible for closing the returned io.ReadCloser.
 // Returns ErrNotOK if the response status is not 200 OK.
-func httpGet(ctx context.Context, client *http.Client, p string) (io.ReadCloser, *fileInfo, error) {
+func httpGet(ctx context.Context, client *http.Client, p string, teeHf bool) (io.ReadCloser, *fileInfo, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, p, nil)
 	if err != nil {
 		return nil, nil, err
@@ -56,7 +56,22 @@ func httpGet(ctx context.Context, client *http.Client, p string) (io.ReadCloser,
 		return nil, nil, fmt.Errorf("%w: http status %d", ErrNotOK, resp.StatusCode)
 	}
 
-	return resp.Body, &fileInfo{
+	body := resp.Body
+	// huggingface HEAD and GET headers may differ, so we perform a HEAD request to get accurate metadata for caching decisions.
+	if teeHf && resp.ContentLength <= 0 {
+		if _, ok := hfHosts[req.URL.Host]; ok {
+			reqHead, err := http.NewRequestWithContext(ctx, http.MethodHead, p, nil)
+			if err != nil {
+				return nil, nil, err
+			}
+			resp, err = client.Do(reqHead)
+			if err != nil {
+				return nil, nil, err
+			}
+		}
+	}
+
+	return body, &fileInfo{
 		name: p,
 		resp: resp,
 	}, nil

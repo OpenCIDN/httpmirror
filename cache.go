@@ -234,7 +234,6 @@ func (m *MirrorHandler) cacheResponse(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
-		defer tee.Close()
 		tee.ServeHTTP(w, r)
 		return
 	}
@@ -278,7 +277,7 @@ func (m *MirrorHandler) cacheFile(ctx context.Context, sourceFile, cacheFile str
 }
 
 func (m *MirrorHandler) cacheFileDirect(ctx context.Context, sourceFile, cacheFile string) error {
-	resp, info, err := httpGet(ctx, m.client(), sourceFile)
+	resp, info, err := httpGet(ctx, m.client(), sourceFile, false)
 	if err != nil {
 		return err
 	}
